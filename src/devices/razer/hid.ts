@@ -1,5 +1,6 @@
 import type { MouseStatus } from "../mouse-types.ts";
 import { VENDOR_ID } from "../vendors.ts";
+import { RATES_1K, RAZER_PRODUCTS, type RazerProduct } from "./devices.ts";
 import {
   RAZER_LANDING_MAX,
   RAZER_LANDING_MIN,
@@ -10,7 +11,6 @@ import {
   RAZER_STATUS,
   RAZER_TRACKING_DISTANCES,
   RAZER_TRANSACTION_ID,
-  RAZER_TRANSACTION_ID_LEGACY,
   RazerProtocolError,
   decodeBatteryPercent,
   decodeCharging,
@@ -37,53 +37,6 @@ import {
   type RazerLiftOff,
   type RazerTrackingDistance,
 } from "./protocol.ts";
-
-interface RazerProduct {
-  model: string;
-  wireless: boolean;
-  pollingRates: readonly number[];
-  /** Sensor ceiling, per axis. */
-  maxDpi: number;
-  /** Razer's per-generation transaction id; a mismatch means no reply at all. */
-  transactionId: number;
-  /** Battery commands only exist on models that have one. */
-  hasBattery: boolean;
-  /** Also accept a vendor-defined collection as the control interface. */
-  vendorControlInterface?: boolean;
-}
-
-// The cable tops out at 1000 Hz on this model, which is also the ceiling the
-// legacy polling command can encode. HyperPolling rates need the receiver.
-const RATES_WIRED: readonly number[] = [125, 500, 1000];
-const RATES_RECEIVER: readonly number[] = [125, 500, 1000, 2000, 4000, 8000];
-
-// The DeathAdder Essential's officially published maximum, and the ceiling the
-// vendor software offers.
-const DEATHADDER_ESSENTIAL = {
-  wireless: false,
-  pollingRates: RATES_WIRED,
-  maxDpi: 6400,
-  transactionId: RAZER_TRANSACTION_ID_LEGACY,
-  hasBattery: false,
-  vendorControlInterface: true,
-} as const;
-
-const VIPER_V3_PRO = {
-  maxDpi: 35000,
-  transactionId: RAZER_TRANSACTION_ID,
-  hasBattery: true,
-} as const;
-
-const PRODUCTS: ReadonlyMap<number, RazerProduct> = new Map([
-  // Stock receiver, not 8K HyperPolling.
-  [0x00a5, { model: "Viper V2 Pro", wireless: false, pollingRates: RATES_WIRED, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, hasBattery: true }],
-  [0x00a6, { model: "Viper V2 Pro", wireless: true, pollingRates: RATES_WIRED, maxDpi: 30000, transactionId: RAZER_TRANSACTION_ID, hasBattery: true }],
-  [0x00c0, { model: "Viper V3 Pro", wireless: false, pollingRates: RATES_WIRED, ...VIPER_V3_PRO }],
-  [0x00c1, { model: "Viper V3 Pro", wireless: true, pollingRates: RATES_RECEIVER, ...VIPER_V3_PRO }],
-  [0x006e, { model: "DeathAdder Essential", ...DEATHADDER_ESSENTIAL }],
-  [0x0071, { model: "DeathAdder Essential White Edition", ...DEATHADDER_ESSENTIAL }],
-  [0x0098, { model: "DeathAdder Essential (2021)", ...DEATHADDER_ESSENTIAL }],
-]);
 
 // The sensor takes any whole DPI from here up to the model's ceiling, per axis.
 const DPI_MIN = 100;
@@ -154,14 +107,27 @@ export class RazerHidClient {
   }
 
   static isSupported(device: HIDDevice): boolean {
-    const product = PRODUCTS.get(device.productId);
+    const product = RAZER_PRODUCTS.get(device.productId);
     if (device.vendorId !== VENDOR_ID.razer || !product) return false;
     return isMouseControlInterface(device)
       || (product.vendorControlInterface === true && hasVendorCollection(device));
   }
 
   private profile(): RazerProduct | undefined {
-    return PRODUCTS.get(this.device.productId);
+    return RAZER_PRODUCTS.get(this.device.productId);
+  }
+
+  /**
+   * Whether polling uses the extended command (a divisor of 8000) rather than
+   * the legacy one (a divisor of 1000).
+   *
+   * Asked of the product rather than of the connection: the Viper 8KHz is wired
+   * and needs the extended command, while the pre-HyperPolling receivers are
+   * wireless and answer only the legacy one. For every model verified so far
+   * this is exactly `isWireless()`, which is what it used to read.
+   */
+  private usesHighRatePolling(): boolean {
+    return this.profile()?.highRatePolling ?? this.isWireless();
   }
 
   async open(): Promise<void> {
@@ -183,12 +149,24 @@ export class RazerHidClient {
     return this.profile()?.wireless ?? false;
   }
 
+  /**
+   * Says so when the model has never been connected by this project.
+   *
+   * The commands are the ones already confirmed elsewhere, but which of them a
+   * given model answers is transcribed rather than measured, so the panel
+   * should not present it as the same thing as a tested mouse.
+   */
+  private connectionDetail(wireless: boolean): string {
+    const link = wireless ? "HyperSpeed receiver" : "Wired USB";
+    return this.profile()?.verified === false ? `${link} · untested model` : link;
+  }
+
   maxDpi(): number {
     return this.profile()?.maxDpi ?? 35000;
   }
 
   getSupportedPollingRates(): number[] {
-    return [...(this.profile()?.pollingRates ?? RATES_WIRED)];
+    return [...(this.profile()?.pollingRates ?? RATES_1K)];
   }
 
   /** Seconds, matching what the panel labels and what `setSleepTimeout` takes. */
@@ -222,7 +200,17 @@ export class RazerHidClient {
     // A wired mouse with no cell answers battery and power-management commands
     // as unsupported, which would otherwise abort the whole status read.
     const hasBattery = this.profile()?.hasBattery !== false;
-    const battery = hasBattery ? await this.readBattery() : null;
+    // On a model nobody has connected, `hasBattery` is a prediction. An
+    // unsupported reply throws, and this read is not optional the way sleep and
+    // low power are, so it would abort the whole status read and take DPI and
+    // polling down with it rather than dropping one card. Verified models still
+    // fail loudly: there, a battery command that stopped answering is news.
+    const battery = hasBattery
+      ? await this.readBattery().catch((error: unknown) => {
+        if (this.profile()?.verified === true) throw error;
+        return null;
+      })
+      : null;
     // Both transports answer this, unlike polling. A transport that ever stops
     // reports no timeout and hides the control rather than failing the whole
     // read, which would take DPI and battery down with it.
@@ -263,7 +251,7 @@ export class RazerHidClient {
       supportedPollingRates: this.getSupportedPollingRates(),
       activeProfile: null,
       connectionType: wireless ? "Wireless" : "Wired",
-      connectionDetail: wireless ? "HyperSpeed receiver" : "Wired USB",
+      connectionDetail: this.connectionDetail(wireless),
       sleepTimeout: sleep ? decodeSleepTimeout(sleep) : null,
       lowBatteryWarning: lowPower ? decodeLowPowerThreshold(lowPower) : null,
       unitId: serial ? decodeSerial(serial) : null,
@@ -271,13 +259,15 @@ export class RazerHidClient {
       // An empty list hides the control, which is what should happen on a
       // transport that does not answer class 0x0b at all.
       supportedLiftOffDistances: liftOff ? [...RAZER_TRACKING_DISTANCES] : [],
-      asymmetricLiftOff: liftOff && {
-        enabled: await this.asymmetricMode(liftOff),
-        liftOff: liftOff.liftOff,
-        landing: liftOff.landing,
-        liftOffRange: { min: RAZER_LIFT_OFF_MIN, max: RAZER_LIFT_OFF_MAX },
-        landingRange: { min: RAZER_LANDING_MIN, max: RAZER_LANDING_MAX },
-      },
+      asymmetricLiftOff: liftOff && this.hasAsymmetricLiftOff()
+        ? {
+          enabled: await this.asymmetricMode(liftOff),
+          liftOff: liftOff.liftOff,
+          landing: liftOff.landing,
+          liftOffRange: { min: RAZER_LIFT_OFF_MIN, max: RAZER_LIFT_OFF_MAX },
+          landingRange: { min: RAZER_LANDING_MIN, max: RAZER_LANDING_MAX },
+        }
+        : null,
       firmware: [`Mouse ${decodeFirmwareVersion(firmware)}`],
     };
   }
@@ -338,7 +328,7 @@ export class RazerHidClient {
     if (!this.getSupportedPollingRates().includes(pollingRateHz)) {
       throw new Error(`This mouse does not support ${pollingRateHz.toLocaleString()} Hz on this connection.`);
     }
-    await this.request(this.isWireless()
+    await this.request(this.usesHighRatePolling()
       ? razerSetExtendedPollingCommand(pollingRateHz)
       : razerSetLegacyPollingCommand(pollingRateHz));
     const confirmed = await this.readPollingRateHz();
@@ -395,6 +385,18 @@ export class RazerHidClient {
       if (error instanceof RazerProtocolError && error.status === RAZER_STATUS.failure) return false;
       return null;
     }
+  }
+
+  /**
+   * Whether this model stores a separate lift-off/landing pair at all.
+   *
+   * Establishing the mode costs a *write*, so it is only attempted where the
+   * pair commands have been confirmed on hardware. A model that has not been
+   * connected keeps the plain three-stop tracking control instead, which costs
+   * reads only.
+   */
+  private hasAsymmetricLiftOff(): boolean {
+    return this.profile()?.asymmetricLiftOff === true;
   }
 
   /** Probes once, then trusts what the setters leave behind. */
@@ -469,7 +471,7 @@ export class RazerHidClient {
   private async readPollingRateHz(): Promise<number> {
     const extended = [RAZER_READ.pollingRateExtended, decodeExtendedPollingRate] as const;
     const legacy = [RAZER_READ.pollingRate, decodeLegacyPollingRate] as const;
-    for (const [command, decode] of this.isWireless() ? [extended, legacy] : [legacy, extended]) {
+    for (const [command, decode] of this.usesHighRatePolling() ? [extended, legacy] : [legacy, extended]) {
       const reply = await this.request(command).catch(() => null);
       if (reply) return decode(reply);
     }

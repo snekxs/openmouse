@@ -3,7 +3,7 @@
 Test in Chrome or Edge over HTTPS. Quit Razer Synapse first — it holds the
 control interface open and reads then time out.
 
-Supported identifiers:
+Identifiers verified on hardware:
 
 - `1532:00a5` — Viper V2 Pro, wired
 - `1532:00a6` — Viper V2 Pro, Stock receiver
@@ -13,6 +13,9 @@ Supported identifiers:
 - `1532:006e` — DeathAdder Essential, wired
 - `1532:0071` — DeathAdder Essential White Edition, wired
 - `1532:0098` — DeathAdder Essential (2021), wired
+
+A further 100 products are claimed from the OpenRazer reference and have never
+been connected — see [Untested models](#untested-models) before testing one.
 
 Razer does not declare its control channel in the HID descriptor, so no
 interface advertises a feature report. The exchange still works because WebHID
@@ -63,6 +66,63 @@ other control is withheld because no command for it has been confirmed.
     keeps reporting without stalling or throwing.
 11. Record the device identifier, firmware version, and any failing setting in
     the issue or pull request.
+
+## Untested models
+
+`devices.ts` claims 100 further products taken from OpenRazer's supported-device
+table. They reuse the commands verified above; what the table records per model
+is which of those commands are valid, which transaction id the mouse answers on,
+and what its sensor and radio can do. **None has been connected**, so each is a
+prediction until someone reports otherwise. The panel says so: the connection
+card reads `… · untested model`.
+
+Testing one is worth doing and is low-risk, because every failure mode here is
+loud rather than silent:
+
+| If this is wrong | What happens |
+| --- | --- |
+| Transaction id | The mouse never replies. The status read fails on firmware and the panel reports a connection failure. Nothing is written. |
+| Interface choice | Same — the wrong interface never answers. Add the device again and pick another entry. |
+| A capability flag | The command is not sent at all. The control is missing, not broken. |
+| DPI or rate ceiling | The write is refused, or fails its read-back and reports what the mouse kept. |
+
+What is deliberately **not** attempted on an untested model:
+
+- The asymmetric lift-off mode probe, which is a *write*. It stays off unless
+  `asymmetricLiftOff` is set, which only the four Viper V2/V3 Pro ids have. An
+  untested mouse that answers class `0x0b` still gets the plain three-stop
+  tracking control, which costs reads only.
+- Lighting, button mapping and macros, none of which this driver implements for
+  any model.
+
+To promote a model to verified:
+
+1. Work through the numbered checklist above for it.
+2. Confirm the model name, connection type and firmware read at all — that alone
+   proves the transaction id and the interface.
+3. Check DPI and polling **against Synapse before writing anything**, then
+   change each, reload, and confirm it persisted.
+4. Correct the model's row in `devices.ts`, set `verified: true`, add its id to
+   the verified list at the top of this file and to `VERIFIED` in
+   `devices.test.ts`, and record the firmware version in the pull request.
+
+Three groups from the OpenRazer list are excluded on purpose, and adding them
+needs new transport work rather than a table row:
+
+- **`legacy/old`** — Orochi 2011 `0x0013`, DeathAdder 3.5G `0x0016` and `0x0029`.
+  These predate the 90-byte report and use direct USB control writes, so this
+  driver could only ever time out on them.
+- **Orochi V2 Bluetooth `0x0095`** — a Bluetooth HID path is not the USB control
+  channel and must not be assumed to take the same reports.
+- **HyperPolling Wireless Dongle `0x00b3`** — a receiver rather than a mouse.
+  Reaching the mouse paired to it needs dongle-specific commands.
+
+The `index3` models (Naga X `0x0096`, Basilisk V3 `0x0099`, Basilisk V3 35K
+`0x00cb`) are the least certain of those that *are* claimed: OpenRazer reaches
+them through USB control-transfer index 3, and WebHID cannot select a `wIndex`.
+The picker offers every interface instead, so the right one has to be found by
+trying them. If none answers, that is worth recording — it would mean these need
+a native helper rather than a driver fix.
 
 ## DeathAdder Essential — not yet hardware-tested
 

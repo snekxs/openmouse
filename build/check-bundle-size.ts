@@ -9,7 +9,7 @@ const BUDGET_BYTES: Record<string, number> = {
   // guarded flash editor, verification exporter, upstream Finalmouse driver,
   // the dedicated Viper Mini protocol driver, and Viper V3 sleep/low-power plus
   // asymmetric lift-off protocol and controls. Preview fixtures remain dev-only.
-  ".js": 325_000,
+  ".js": 335_000,
 };
 
 const ASSETS = join("dist", "assets");

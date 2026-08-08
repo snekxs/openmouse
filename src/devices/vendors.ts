@@ -1,5 +1,6 @@
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
 import { LOGITECH_DIRECT_PRODUCT_IDS } from "./logitech/protocol.ts";
+import { RAZER_PRODUCT_IDS } from "./razer/devices.ts";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -50,6 +51,26 @@ export const RAZER_VIPER_V4_CONTROL_FILTERS: HIDDeviceFilter[] = [0x00e5, 0x00e6
 export const RAZER_DEATHADDER_ESSENTIAL_FILTERS: HIDDeviceFilter[] = [0x006e, 0x0071, 0x0098].map(
   (productId) => ({ vendorId: VENDOR_ID.razer, productId }),
 );
+
+/**
+ * Razer product ids whose control interface is known, and which therefore get a
+ * narrower filter of their own above. Excluded from the catch-all below so a
+ * broad filter cannot quietly widen one that was deliberately narrowed.
+ */
+const RAZER_NARROWED_PRODUCT_IDS: ReadonlySet<number> = new Set([
+  0x00a5, 0x00a6, 0x00c0, 0x00c1, 0x006e, 0x0071, 0x0098,
+]);
+
+/**
+ * Every remaining product in the Razer registry. Which interface carries the
+ * control channel has not been established for these, and it varies by
+ * revision, so the whole device is requested and the picker offers each
+ * interface: the driver rejects the ones that cannot answer, and a model whose
+ * first entry never replies is added again on another entry.
+ */
+export const RAZER_REGISTRY_FILTERS: HIDDeviceFilter[] = RAZER_PRODUCT_IDS
+  .filter((productId) => !RAZER_NARROWED_PRODUCT_IDS.has(productId))
+  .map((productId) => ({ vendorId: VENDOR_ID.razer, productId }));
 
 export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const;
 
@@ -126,6 +147,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.atk, usagePage: 0xff02, usage: 2 },
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
+  ...RAZER_REGISTRY_FILTERS,
   ...EGG_WE_HID_FILTERS,
   ...LOGITECH_RECEIVER_FILTERS,
 ];

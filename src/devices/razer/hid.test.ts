@@ -92,6 +92,64 @@ function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
   return { client: new RazerHidClient(device), sent };
 }
 
+/**
+ * A mouse that answers firmware, DPI and legacy polling, and reports every
+ * power-management command (class 0x07) as unsupported — the shape an untested
+ * model takes when its `hasBattery` prediction is wrong.
+ */
+function fakeMouseWithoutBattery(productId: number) {
+  let pending = new Uint8Array(RAZER_PACKET_LENGTH);
+  const device = {
+    vendorId: 0x1532,
+    productId,
+    productName: "Razer test device",
+    opened: true,
+    collections: [{ usagePage: 0x01, usage: 0x02, children: [], featureReports: [], inputReports: [], outputReports: [] }],
+    open: async () => {},
+    close: async () => {},
+    sendFeatureReport: async (_reportId: number, data: Uint8Array) => {
+      const [commandClass, commandId] = [data[6], data[7]];
+      const answer = (dataSize: number, args: number[]) =>
+        replyPacket(commandClass, commandId, dataSize, args, RAZER_STATUS.ok);
+      if (commandClass === 0x00 && commandId === 0x81) pending = answer(0x02, [1, 12]);
+      else if (commandClass === 0x04 && commandId === 0x85) pending = answer(0x07, [0x01, 0x03, 0x20, 0x03, 0x20]);
+      else if (commandClass === 0x00 && commandId === 0x85) pending = answer(0x01, [1]);
+      else pending = replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.unsupported);
+    },
+    receiveFeatureReport: async () => new DataView(pending.buffer.slice(0)),
+  } as unknown as HIDDevice;
+  return new RazerHidClient(device);
+}
+
+test("an untested model that refuses the battery read still reports the rest", async () => {
+  // `hasBattery` is a prediction on a model nobody has connected. Unlike sleep
+  // and low power, this read is not optional, so an unsupported reply would
+  // abort the whole status read and take DPI and polling down with it.
+  // Arrange: 0x0083 is Basilisk X HyperSpeed — wireless, unverified.
+  const client = fakeMouseWithoutBattery(0x0083);
+
+  // Act
+  const status = await client.readStatus();
+
+  // Assert
+  assert.equal(status.name, "Razer Basilisk X HyperSpeed");
+  assert.equal(status.batteryPercent, null);
+  assert.equal(status.dpi, 800);
+  assert.equal(status.pollingRateHz, 1000);
+  // The panel should not present a transcribed model as a tested one.
+  assert.match(status.connectionDetail ?? "", /untested model/);
+});
+
+test("a verified model still fails loudly when its battery read stops answering", async () => {
+  // There the command is known to exist, so a refusal is news rather than an
+  // absent capability, and hiding it would hide a real fault.
+  // Arrange: 0x00c1 is the Viper V3 Pro receiver.
+  const client = fakeMouseWithoutBattery(0x00c1);
+
+  // Act / Assert
+  await assert.rejects(() => client.readStatus(), /not supported by this mouse/);
+});
+
 test("lift-off reads the tracking level and the asymmetric pair together", async () => {
   // Arrange
   const { client } = fakeMouse({ tracking: 1, liftOff: 16, landing: 11, asymmetric: true });

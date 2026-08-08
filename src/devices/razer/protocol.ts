@@ -20,6 +20,16 @@ export const RAZER_TRANSACTION_ID = 0x1f;
  */
 export const RAZER_TRANSACTION_ID_LEGACY = 0x3f;
 
+/**
+ * The id most of Razer's pre-HyperPolling mice answer on. Verified in this repo
+ * on the Viper Mini, whose dedicated driver pins the same value independently.
+ *
+ * Kept as a third named constant rather than a default, because there is no
+ * safe default: choosing the wrong one produces silence rather than an error,
+ * so every product has to state which id it answers on.
+ */
+export const RAZER_TRANSACTION_ID_DEFAULT = 0xff;
+
 const ARGS_OFFSET = 8;
 const CHECKSUM_INDEX = 88;
 const CHECKSUM_FIRST = 2;
