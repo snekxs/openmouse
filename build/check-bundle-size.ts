@@ -2,14 +2,16 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const BUDGET_BYTES: Record<string, number> = {
-  // Viper V3 sleep and low-power controls add a small, device-specific row to
-  // the existing settings UI.
-  ".css": 46_000,
+  // Viper V3 sleep and low-power controls plus the Viper Mini lighting card
+  // (effect, colour, and reactive speed pickers) add small device-specific
+  // rows to the existing settings UI.
+  ".css": 47_000,
   // Raised from 280 kB for the production Logitech onboard-profile codec,
   // guarded flash editor, verification exporter, upstream Finalmouse driver,
-  // the dedicated Viper Mini protocol driver, and Viper V3 sleep/low-power plus
-  // asymmetric lift-off protocol and controls. Preview fixtures remain dev-only.
-  ".js": 325_000,
+  // the dedicated Viper Mini protocol driver, Viper V3 sleep/low-power plus
+  // asymmetric lift-off protocol and controls, and the Viper Mini extended
+  // matrix effect builder with its lighting UI. Preview fixtures remain dev-only.
+  ".js": 335_000,
 };
 
 const ASSETS = join("dist", "assets");

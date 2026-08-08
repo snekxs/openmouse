@@ -1,4 +1,4 @@
-import type { MouseStatus } from "./devices/mouse-types";
+import type { MouseLighting, MouseStatus } from "./devices/mouse-types";
 import { PREVIEW_KEYS, type FixturePreviewMode } from "./preview-modes";
 
 export { PREVIEW_KEYS };
@@ -219,6 +219,47 @@ const RAZER_VIPER_V4: MouseStatus = {
   firmware: ["1.00.04"],
 };
 
+const RAZER_VIPER_MINI_LIGHTING: MouseLighting = {
+  zone: "Logo",
+  modes: ["Off", "Spectrum", "Static", "Reactive", "Breathing random", "Breathing single", "Breathing dual"],
+  mode: "Breathing dual",
+  color: "#00ff00",
+  color2: "#ff0000",
+  colorModes: ["Static", "Reactive", "Breathing single", "Breathing dual"],
+  dualColorModes: ["Breathing dual"],
+  reactiveModes: ["Reactive"],
+  speeds: [1, 2, 3, 4],
+  speed: 2,
+  writeOnly: true,
+};
+
+const RAZER_VIPER_MINI: MouseStatus = {
+  brand: "Razer",
+  name: "Viper Mini",
+  ui: {
+    family: "razer",
+    settingsReady: true,
+    valuesVerified: true,
+    hideUnsupportedPollingRates: true,
+    hideProcessingCard: true,
+    defaultDisplayName: "Viper Mini",
+  },
+  batteryPercent: null,
+  batteryState: "Unknown",
+  dpi: 800,
+  dpiY: 800,
+  supportsSeparateDpiAxes: true,
+  pollingRateHz: 1000,
+  supportedPollingRates: [125, 500, 1000],
+  activeProfile: null,
+  liftOffDistance: null,
+  supportedLiftOffDistances: [],
+  connectionType: "Wired",
+  connectionDetail: "Wired USB",
+  lighting: RAZER_VIPER_MINI_LIGHTING,
+  firmware: ["Mouse 1.01"],
+};
+
 const TEEVOLUTION: MouseStatus = {
   brand: "Teevolution",
   name: "Terra Pro",
@@ -312,6 +353,7 @@ export const PREVIEW_FIXTURES: Record<FixturePreviewMode, PreviewFixture> = {
   atk: { label: "ATK A9 Ultra", status: ATK },
   orbital: { label: "Orbital One", status: ORBITAL },
   razer: { label: "Razer Viper V3 Pro", status: RAZER },
+  "razer-viper-mini": { label: "Razer Viper Mini", status: RAZER_VIPER_MINI },
   "razer-viper-v4": { label: "Razer Viper V4 Pro", status: RAZER_VIPER_V4 },
   teevolution: { label: "Teevolution Terra Pro", status: TEEVOLUTION },
   vgn: { label: "VGN F2 Master Plus", status: VGN },

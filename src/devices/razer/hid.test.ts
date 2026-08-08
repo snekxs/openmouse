@@ -26,6 +26,8 @@ interface FakeOptions {
   liftOffUnsupported?: boolean;
   /** Accept the write and keep the old values, as a rejected write does. */
   ignoreWrites?: boolean;
+  /** Answer the next N sends with a reply whose checksum is wrong. */
+  corruptSends?: number;
 }
 
 function replyPacket(commandClass: number, commandId: number, dataSize: number, args: number[], status: number): Uint8Array {
@@ -48,6 +50,7 @@ function replyPacket(commandClass: number, commandId: number, dataSize: number, 
 function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
   const sent: Uint8Array[] = [];
   let pending = new Uint8Array(RAZER_PACKET_LENGTH);
+  let corruptRemaining = options.corruptSends ?? 0;
   const device = {
     vendorId: 0x1532,
     productId: 0x00c1,
@@ -86,6 +89,13 @@ function fakeMouse(state: FakeLiftOff, options: FakeOptions = {}) {
       pending = liftOffRead
         ? replyPacket(commandClass, commandId, 0x05, [0, 0, state.tracking, state.liftOff - 1, state.landing - 1], RAZER_STATUS.ok)
         : replyPacket(commandClass, commandId, data[5], [...data.slice(8, 8 + data[5])], RAZER_STATUS.ok);
+      if (corruptRemaining > 0) {
+        // The receiver returns garbage while it reconfigures after a rate
+        // change; break the checksum so the exchange has to be re-sent.
+        pending = replyPacket(commandClass, commandId, data[5], [], RAZER_STATUS.ok);
+        pending[88] ^= 0xff;
+        corruptRemaining -= 1;
+      }
     },
     receiveFeatureReport: async () => new DataView(pending.buffer.slice(0)),
   } as unknown as HIDDevice;
@@ -101,6 +111,39 @@ test("lift-off reads the tracking level and the asymmetric pair together", async
 
   // Assert
   assert.deepEqual(liftOff, { tracking: "Medium", liftOff: 16, landing: 11 });
+});
+
+test("a corrupt reply is retried instead of surfacing a checksum error", async () => {
+  // The receiver returns garbage while it reconfigures the wireless link after
+  // a polling-rate change, which is what produced the "bad checksum" errors
+  // right after an 8,000 Hz switch. A bad checksum means the exchange was lost,
+  // so the driver re-sends the request until a valid reply arrives — otherwise
+  // a single corrupt reply would hide the lift-off card entirely.
+  // Arrange
+  const { client, sent } = fakeMouse({ tracking: 1, liftOff: 16, landing: 11, asymmetric: true }, { corruptSends: 2 });
+
+  // Act
+  const liftOff = await client.readLiftOff();
+
+  // Assert
+  assert.deepEqual(liftOff, { tracking: "Medium", liftOff: 16, landing: 11 });
+  assert.equal(sent.length, 3);
+});
+
+test("retrying a corrupt reply does not break the command/response pairing", async () => {
+  // Re-sending on a corrupt reply must never let one command swallow another's
+  // reply. A multi-command sequence — unlock, pair write, read-back — still has
+  // to land in order even when one of its exchanges comes back corrupt.
+  // Arrange
+  const { client, sent } = fakeMouse({ tracking: 2, liftOff: 26, landing: 25, asymmetric: true }, { corruptSends: 1 });
+
+  // Act
+  const confirmed = await client.setLiftOff(16, 11);
+
+  // Assert
+  assert.deepEqual(confirmed, { tracking: "High", liftOff: 16, landing: 11 });
+  // The unlock, the pair write, the corrupt pair read, and its re-sent read.
+  assert.equal(sent.length, 4);
 });
 
 test("a transport that rejects class 0x0b degrades to null instead of throwing", async () => {

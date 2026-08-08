@@ -40,6 +40,46 @@ export interface MouseUiHints {
   defaultDisplayName?: string;
 }
 
+/**
+ * A lighting zone a driver can write effects to. The mouse may not be able to
+ * report its current effect back (Razer's effect commands are writes without a
+ * matching read), in which case `writeOnly` marks that `mode` and friends come
+ * from the driver's own last-write cache rather than the hardware.
+ */
+export interface MouseLighting {
+  /** Label for the lit zone, e.g. "Logo". */
+  zone: string;
+  /** Effects the driver can write, in display order. */
+  modes: readonly MouseLightingMode[];
+  /** Effect currently selected; null before any value is known. */
+  mode: MouseLightingMode | null;
+  /** Base colour "#rrggbb". */
+  color: string | null;
+  /** Second colour for two-colour effects "#rrggbb". */
+  color2: string | null;
+  /** Effects that use the single colour picker. */
+  colorModes: readonly MouseLightingMode[];
+  /** Effects that use the second colour picker. */
+  dualColorModes: readonly MouseLightingMode[];
+  /** Effects that use the reactive speed picker. */
+  reactiveModes: readonly MouseLightingMode[];
+  /** Reactive speed levels the driver understands. */
+  speeds: readonly number[];
+  /** Reactive speed currently selected. */
+  speed: number | null;
+  /** True when the mouse cannot report the effect back (Razer effect writes). */
+  writeOnly?: boolean;
+}
+
+export type MouseLightingMode =
+  | "Off"
+  | "Static"
+  | "Spectrum"
+  | "Reactive"
+  | "Breathing random"
+  | "Breathing single"
+  | "Breathing dual";
+
 export interface MouseStatus {
   brand: "Logitech" | "Pulsar" | "Endgame Gear" | "WLMouse" | "Lamzu" | "Orbital" | "Razer" | "Teevolution" | "ATK" | "VGN" | "Finalmouse";
   name: string;
@@ -125,5 +165,7 @@ export interface MouseStatus {
   } | null;
   gamingSurfaceMode?: "On" | "Off" | "Auto" | null;
   lightforceSwitchMode?: "Hybrid" | "Optical" | null;
+  /** Razer lighting zones. */
+  lighting?: MouseLighting;
   firmware: string[];
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { RAZER_READ, encodeRazerRequest, razerSetDpiCommand, razerSetLegacyPollingCommand } from "./protocol.ts";
+import { RAZER_READ, encodeRazerRequest, razerSetDpiCommand, razerSetExtendedEffectCommand, razerSetLegacyPollingCommand } from "./protocol.ts";
 import {
   VIPER_MINI_DPI_READ,
   VIPER_MINI_PRODUCT_ID,
@@ -38,6 +38,26 @@ test("Viper Mini polling writes the legacy divisor of 1000", () => {
 
   assert.equal(packet[1], 0xff);
   assert.deepEqual([packet[6], packet[7], packet[8]], [0x00, 0x05, 2]);
+});
+
+test("Viper Mini effects match openrazer's extended matrix payloads", () => {
+  const cases: Array<{ effect: "off" | "static" | "spectrum" | "reactive" | "breathing-random" | "breathing-single" | "breathing-dual"; options?: object; dataSize: number; args: number[] }> = [
+    { effect: "off", dataSize: 0x06, args: [0x01, 0x04, 0x00, 0x00, 0x00, 0x00] },
+    { effect: "static", options: { color: "#ff0000" }, dataSize: 0x09, args: [0x01, 0x04, 0x01, 0x00, 0x00, 0x01, 0xff, 0x00, 0x00] },
+    { effect: "spectrum", dataSize: 0x06, args: [0x01, 0x04, 0x03, 0x00, 0x00, 0x00] },
+    { effect: "reactive", options: { color: "#00ff00", speed: 2 }, dataSize: 0x09, args: [0x01, 0x04, 0x05, 0x00, 0x02, 0x01, 0x00, 0xff, 0x00] },
+    { effect: "breathing-random", dataSize: 0x06, args: [0x01, 0x04, 0x02, 0x00, 0x00, 0x00] },
+    { effect: "breathing-single", options: { color: "#0000ff" }, dataSize: 0x09, args: [0x01, 0x04, 0x02, 0x01, 0x00, 0x01, 0x00, 0x00, 0xff] },
+    { effect: "breathing-dual", options: { color: "#ff0000", color2: "#00ff00" }, dataSize: 0x0c, args: [0x01, 0x04, 0x02, 0x02, 0x00, 0x02, 0xff, 0x00, 0x00, 0x00, 0xff, 0x00] },
+  ];
+
+  for (const { effect, options, dataSize, args } of cases) {
+    const command = razerSetExtendedEffectCommand(effect, options as Parameters<typeof razerSetExtendedEffectCommand>[1]);
+    assert.equal(command.commandClass, 0x0f);
+    assert.equal(command.commandId, 0x02);
+    assert.equal(command.dataSize, dataSize);
+    assert.deepEqual(command.args, args);
+  }
 });
 
 test("Viper Mini accepts only its own PID on a single Generic Desktop Mouse collection", () => {

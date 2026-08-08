@@ -80,7 +80,7 @@ import {
 } from "./devices/logitech/onboard-profiles";
 import { escapeHtml } from "./ui/dom";
 import { bindCapturePanel, setCaptureContext } from "./capture-panel";
-import type { MouseStatus } from "./devices/mouse-types";
+import type { MouseLighting, MouseStatus } from "./devices/mouse-types";
 import { PulsarProHidClient } from "./devices/pulsar/pulsar-pro-hid";
 import { OrbitalHidClient } from "./devices/orbital/hid";
 import { RazerHidClient } from "./devices/razer/hid";
@@ -406,6 +406,7 @@ function renderControl(): void {
     capLandingToLiftOff,
     applyGamingSurfaceMode,
     applyLightforceSwitchMode,
+    applyLighting,
     flashPendingChanges,
     revertPendingChanges,
     applyOnboardMode,
@@ -1314,6 +1315,7 @@ function showStatus(deviceStatus: MouseStatus): void {
     setSelected(button, button.dataset.lightforce === status.lightforceSwitchMode);
     button.disabled = settingsPending || !status.lightforceSwitchMode;
   });
+  renderLighting(status, settingsPending);
   document.querySelectorAll<HTMLButtonElement>("[data-dpi]").forEach((button) => {
     setSelected(button, Number(button.dataset.dpi) === status.dpi);
     button.disabled = settingsPending;
@@ -1345,6 +1347,69 @@ function showStatus(deviceStatus: MouseStatus): void {
   if (status.brand === "Logitech") renderLogitechDetails(status);
   renderLogitechAnalogButtonSettings(status);
   renderDeviceDiagnostics(deviceStatus);
+}
+
+function renderLighting(status: MouseStatus, settingsPending: boolean): void {
+  const card = document.querySelector<HTMLElement>("#lighting-card");
+  const lighting = status.lighting;
+  if (!card) return;
+  if (!lighting) {
+    card.hidden = true;
+    card.style.display = "none";
+    return;
+  }
+  card.hidden = false;
+  card.style.display = "";
+  const mode = lighting.mode;
+  const usesColor = mode !== null && lighting.colorModes.includes(mode);
+  const usesColor2 = mode !== null && lighting.dualColorModes.includes(mode);
+  const usesSpeed = mode !== null && lighting.reactiveModes.includes(mode);
+  const modesContainer = document.querySelector<HTMLElement>("#lighting-modes");
+  if (modesContainer) {
+    modesContainer.innerHTML = lighting.modes
+      .map((candidate) => `<button type="button" data-lighting-mode="${candidate}" aria-pressed="${candidate === mode}">${candidate}</button>`)
+      .join("");
+  }
+  document.querySelectorAll<HTMLButtonElement>("[data-lighting-mode]").forEach((button) => {
+    setSelected(button, button.dataset.lightingMode === mode);
+    button.disabled = settingsPending;
+  });
+  const colorRow = document.querySelector<HTMLElement>("#lighting-color-row");
+  if (colorRow) colorRow.hidden = !usesColor;
+  const color2Field = document.querySelector<HTMLElement>("#lighting-color2-field");
+  if (color2Field) color2Field.hidden = !usesColor2;
+  if (usesColor) setControlValue("#lighting-color", lighting.color ?? "#00ff00");
+  if (usesColor2) setControlValue("#lighting-color2", lighting.color2 ?? "#ff0000");
+  const speedRow = document.querySelector<HTMLElement>("#lighting-speed-row");
+  if (speedRow) speedRow.hidden = !usesSpeed;
+  if (usesSpeed) {
+    const speedsContainer = document.querySelector<HTMLElement>("#lighting-speeds");
+    if (speedsContainer) {
+      speedsContainer.innerHTML = lighting.speeds
+        .map((speed) => `<button type="button" data-lighting-speed="${speed}" aria-pressed="${speed === lighting.speed}">${speed}</button>`)
+        .join("");
+    }
+    document.querySelectorAll<HTMLButtonElement>("[data-lighting-speed]").forEach((button) => {
+      setSelected(button, Number(button.dataset.lightingSpeed) === lighting.speed);
+      button.disabled = settingsPending;
+    });
+  }
+  const pending = document.querySelector<HTMLElement>("#lighting-pending");
+  if (pending) pending.textContent = isPendingChange("lighting")
+    ? `Staged: ${describeLighting(status.lighting ?? lighting)}`
+    : "Choose an effect";
+  const writeOnlyBadge = document.querySelector<HTMLElement>("#lighting-write-only-badge");
+  if (writeOnlyBadge) writeOnlyBadge.hidden = !lighting.writeOnly;
+  const note = document.querySelector<HTMLElement>("#lighting-note");
+  if (note) {
+    note.textContent = lighting.writeOnly
+      ? "The mouse cannot report its current effect, so this shows the last value written."
+      : `Picks the ${lighting.zone} light effect.`;
+  }
+  const colorInput = document.querySelector<HTMLInputElement>("#lighting-color");
+  if (colorInput) colorInput.disabled = settingsPending || !usesColor;
+  const color2Input = document.querySelector<HTMLInputElement>("#lighting-color2");
+  if (color2Input) color2Input.disabled = settingsPending || !usesColor2;
 }
 
 function renderLogitechAnalogButtonSettings(status: MouseStatus): void {
@@ -2941,6 +3006,48 @@ function applyLiftOffDistance(lod: NonNullable<MouseStatus["liftOffDistance"]>):
     },
     apply: async () => {
       await requireClientMethod("setLiftOffDistance", "the lift-off distance").setLiftOffDistance(lod);
+    },
+  });
+}
+
+function describeLighting(lighting: MouseLighting): string {
+  if (!lighting.mode) return "No effect";
+  const parts: string[] = [lighting.mode];
+  if (lighting.colorModes.includes(lighting.mode) && lighting.color) parts.push(lighting.color.toUpperCase());
+  if (lighting.dualColorModes.includes(lighting.mode) && lighting.color2) parts.push(lighting.color2.toUpperCase());
+  if (lighting.reactiveModes.includes(lighting.mode) && lighting.speed !== null) parts.push(`speed ${lighting.speed}`);
+  return parts.join(" · ");
+}
+
+function lightingCommand(lighting: MouseLighting): string {
+  return `Set lighting to ${describeLighting(lighting)}`;
+}
+
+/**
+ * Lighting is staged like any other setting, but a driver may mark it
+ * `writeOnly`, in which case the mouse cannot report the effect back and the
+ * preview is the only source of the current value.
+ */
+function applyLighting(patch: Partial<Pick<MouseLighting, "mode" | "color" | "color2" | "speed">>): void {
+  if (!hasActiveClient() || !latestDeviceStatus?.lighting) {
+    setText("#read-status", "Lighting is not available for this mouse.");
+    return;
+  }
+  const staged = { ...withPendingChanges(latestDeviceStatus).lighting!, ...patch } as MouseLighting;
+  if (!staged.mode) {
+    setText("#read-status", "Pick an effect first.");
+    return;
+  }
+  stageChange({
+    key: "lighting",
+    label: `Lighting ${staged.mode.toLowerCase()}`,
+    command: lightingCommand(staged),
+    progress: `Setting ${staged.mode.toLowerCase()} lighting…`,
+    preview: (status) => {
+      if (status.lighting) status.lighting = { ...status.lighting, ...patch } as MouseLighting;
+    },
+    apply: async () => {
+      await requireClientMethod("setLighting", "the lighting").setLighting(staged);
     },
   });
 }

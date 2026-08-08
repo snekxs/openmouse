@@ -1,5 +1,5 @@
 import type { EggSpdtMode } from "./devices/endgame/egg-op1-hid";
-import type { MouseStatus } from "./devices/mouse-types";
+import type { MouseLighting, MouseStatus } from "./devices/mouse-types";
 import { clampBunnyHopMs } from "./devices/logitech/onboard-profiles";
 
 type EggLiftOffLevel = NonNullable<MouseStatus["liftOffDistance"]>;
@@ -54,6 +54,7 @@ export interface ControlEventHandlers {
   capLandingToLiftOff(): void;
   applyGamingSurfaceMode(mode: NonNullable<MouseStatus["gamingSurfaceMode"]>): void;
   applyLightforceSwitchMode(mode: NonNullable<MouseStatus["lightforceSwitchMode"]>): void;
+  applyLighting(patch: Partial<Pick<MouseLighting, "mode" | "color" | "color2" | "speed">>): void;
   // Mode and profile selection apply immediately: both are volatile navigation
   // actions, and the profiles cannot be re-read until they have taken effect.
   applyOnboardMode(mode: "Onboard" | "Host"): Promise<void>;
@@ -376,6 +377,22 @@ export function bindControlEvents(handlers: ControlEventHandlers): void {
       const mode = button.dataset.lightforce as MouseStatus["lightforceSwitchMode"];
       if (mode) void handlers.applyLightforceSwitchMode(mode);
     });
+  });
+  // The effect and speed buttons are rebuilt on every render, so their clicks
+  // are delegated to the containers that own them.
+  document.querySelector<HTMLElement>("#lighting-modes")?.addEventListener("click", (event) => {
+    const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-lighting-mode]");
+    if (target && !target.disabled) handlers.applyLighting({ mode: target.dataset.lightingMode as MouseLighting["mode"] });
+  });
+  document.querySelector<HTMLElement>("#lighting-speeds")?.addEventListener("click", (event) => {
+    const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-lighting-speed]");
+    if (target && !target.disabled) handlers.applyLighting({ speed: Number(target.dataset.lightingSpeed) });
+  });
+  document.querySelector<HTMLInputElement>("#lighting-color")?.addEventListener("change", (event) => {
+    handlers.applyLighting({ color: (event.target as HTMLInputElement).value });
+  });
+  document.querySelector<HTMLInputElement>("#lighting-color2")?.addEventListener("change", (event) => {
+    handlers.applyLighting({ color2: (event.target as HTMLInputElement).value });
   });
   const shell = document.querySelector<HTMLElement>(".control-shell");
   const panel = document.querySelector<HTMLElement>(".control-panel");

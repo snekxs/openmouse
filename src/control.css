@@ -158,6 +158,14 @@ nav { display: grid; gap: .3rem; margin-top: 1.4rem; }
 .dpi-presets { grid-template-columns: repeat(3, 1fr); }
 .dpi-presets button { padding-inline: .25rem; }
 .rate-options { grid-template-columns: repeat(4, 1fr); }
+.lighting-modes { grid-template-columns: repeat(auto-fill, minmax(5.75rem, 1fr)); }
+.lighting-modes button { padding-inline: .35rem; }
+.lighting-color-row { display: flex; gap: 1rem; margin-top: 1rem; }
+.lighting-color-field { display: flex; flex-direction: column; gap: .3rem; color: var(--faint); font-family: var(--font-mono); font-size: .58rem; letter-spacing: .07em; text-transform: uppercase; }
+.lighting-color-field input[type="color"] { width: 5rem; height: 2rem; box-sizing: border-box; padding: .18rem; border: 1px solid #303034; border-radius: 7px; background: var(--input); cursor: pointer; }
+.lighting-color-field input[type="color"]:disabled { cursor: default; opacity: .45; }
+.lighting-speed-row { margin-top: 1rem; }
+.lighting-speed-row .segmented { grid-template-columns: repeat(4, 1fr); max-width: 15rem; }
 
 .dpi-header-actions { display: flex; align-items: center; gap: .45rem; }
 .dpi-header-actions button { padding: .38rem .6rem; border: 1px solid var(--line-strong); border-radius: 6px; background: #171719; color: var(--dim); font-size: .62rem; font-weight: 700; white-space: nowrap; }

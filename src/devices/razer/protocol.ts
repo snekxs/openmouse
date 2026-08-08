@@ -50,6 +50,9 @@ export interface RazerCommand {
  */
 const RAZER_STORAGE = 0x01;
 
+/** The underglow's led id in openrazer's extended-matrix family. */
+const RAZER_LED_LOGO = 0x04;
+
 /** Read-only commands confirmed against Viper V3 Pro firmware 1.12. */
 export const RAZER_READ = {
   firmware: { commandClass: 0x00, commandId: 0x81, dataSize: 0x02 },
@@ -119,6 +122,89 @@ export function razerSetLegacyPollingCommand(pollingRateHz: number): RazerComman
 /** The receiver takes the same leading argument its read echoes back. */
 export function razerSetExtendedPollingCommand(pollingRateHz: number): RazerCommand {
   return { ...RAZER_WRITE.pollingRateExtended, args: [0x00, pollingDivisor(8000, pollingRateHz)] };
+}
+
+export type RazerExtendedEffect =
+  | "off"
+  | "static"
+  | "spectrum"
+  | "reactive"
+  | "breathing-random"
+  | "breathing-single"
+  | "breathing-dual";
+
+/** Effect ids from openrazer's `razer_chroma_extended_matrix_effect_*` family. */
+export const RAZER_EFFECT = {
+  off: 0x00,
+  static: 0x01,
+  spectrum: 0x03,
+  reactive: 0x05,
+  "breathing-random": 0x02,
+  "breathing-single": 0x02,
+  "breathing-dual": 0x02,
+} as const satisfies Record<RazerExtendedEffect, number>;
+
+export type RazerReactiveSpeed = 1 | 2 | 3 | 4;
+
+/** Synapse's reactive speed scale: 1 is fast, 4 is slow. */
+export const RAZER_EFFECT_SPEED = { 1: 1, 2: 2, 3: 3, 4: 4 } as const satisfies Record<RazerReactiveSpeed, number>;
+
+export function parseRazerColor(hex: string): [number, number, number] {
+  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!match) throw new RazerProtocolError(`${hex} is not a "#rrggbb" colour.`);
+  const value = Number.parseInt(match[1], 16);
+  return [(value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff];
+}
+
+/**
+ * Extended effect command for the Viper Mini's extended-matrix family (`0x0f` /
+ * `0x02`), matching openrazer's `razer_chroma_extended_matrix_effect_*`
+ * functions, which this mouse dispatches through with `VARSTORE` and the logo
+ * led. The mouse's one 1x1 matrix means a single underglow zone.
+ *
+ * All effects share the `[VARSTORE, logo, effect]` header. Breathing variants
+ * differ only in the colour count byte and payload length, and reactive adds a
+ * speed level between the header and its single colour.
+ */
+export function razerSetExtendedEffectCommand(
+  effect: RazerExtendedEffect,
+  options: {
+    color?: string;
+    color2?: string;
+    speed?: RazerReactiveSpeed;
+  } = {},
+): RazerCommand {
+  const args: number[] = [RAZER_STORAGE, RAZER_LED_LOGO, RAZER_EFFECT[effect]];
+  switch (effect) {
+    case "off":
+    case "spectrum":
+    case "breathing-random":
+      args.push(0x00, 0x00, 0x00);
+      break;
+    case "static":
+      if (!options.color) throw new RazerProtocolError(`${effect} needs a colour.`);
+      args.push(0x00, 0x00, 0x01, ...parseRazerColor(options.color));
+      break;
+    case "reactive":
+      if (!options.color) throw new RazerProtocolError(`${effect} needs a colour.`);
+      if (!options.speed) throw new RazerProtocolError("Reactive needs a speed.");
+      args.push(0x00, RAZER_EFFECT_SPEED[options.speed], 0x01, ...parseRazerColor(options.color));
+      break;
+    case "breathing-single":
+      if (!options.color) throw new RazerProtocolError("Breathing single needs a colour.");
+      args.push(0x01, 0x00, 0x01, ...parseRazerColor(options.color));
+      break;
+    case "breathing-dual":
+      if (!options.color || !options.color2) throw new RazerProtocolError("Breathing dual needs two colours.");
+      args.push(0x02, 0x00, 0x02, ...parseRazerColor(options.color), ...parseRazerColor(options.color2));
+      break;
+  }
+  return {
+    commandClass: 0x0f,
+    commandId: 0x02,
+    dataSize: args.length,
+    args,
+  };
 }
 
 export class RazerProtocolError extends Error {
