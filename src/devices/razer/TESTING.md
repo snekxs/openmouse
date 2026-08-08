@@ -141,6 +141,16 @@ and a 500 Hz write measured 499 Hz through `pointerrawupdate`.
 The cable is limited to 1000 Hz on this model, which is also the ceiling the
 legacy encoding can express, so no HyperPolling command is missing there.
 
+## Changing the polling rate reconfigures the link
+
+Switching the receiver to 8,000 Hz briefly reconfigures the wireless link, and
+feature-report exchanges sent into that window come back with a bad checksum or
+not at all. `setPollingRate` pauses 150 ms for the link to settle, and `exchange`
+re-sends a request whose reply was corrupt instead of surfacing the checksum
+error — so a single garbage reply no longer fails the whole status read or hides
+the lift-off card. The read-back budget is unchanged in the healthy case; only a
+lost exchange takes the retry path.
+
 ## Idle sleep range
 
 Synapse slides from **1 to 15 minutes** in whole minutes, so the dropdown offers
