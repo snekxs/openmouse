@@ -456,6 +456,13 @@ export class LogitechHidppClient {
     this.lodCapabilities = capabilitiesForFormat(onboardProfileFormat?.id);
     this.supportedLods = [...this.lodCapabilities.supportedLods];
     const wired = this.device.productId === 0xc0a8 || this.isDirectConnect;
+    // A direct-connect mouse keeps its rate in the onboard profile, so it can
+    // only change once that format is verified and actually carries a
+    // report-rate field. Anything else stays read-only.
+    const profileRateWritable = this.isDirectConnect
+      && this.profileFormatId !== null
+      && describeProfileFormat(this.profileFormatId).verified
+      && capabilitiesForFormat(this.profileFormatId).reportRates !== null;
 
     return {
       brand: "Logitech",
@@ -465,10 +472,13 @@ export class LogitechHidppClient {
         // Logitech allows Lift-off Distance modification only when Gaming Surface Mode is set to "on" or "auto"
         lodRequiresSurface: true,
         // Direct-connect mice report their rate but keep the writable copy in
-        // the onboard profile, so show it without offering to change it.
-        pollingReadOnly: this.isDirectConnect ? true : undefined,
+        // the onboard profile. It is editable again once the profile write path
+        // is available for that format.
+        pollingReadOnly: this.isDirectConnect && !profileRateWritable ? true : undefined,
         pollingNote: this.isDirectConnect
-          ? "This mouse stores its polling rate in the onboard profile, so OpenMouse reads it without changing it."
+          ? profileRateWritable
+            ? "Stored in this mouse's onboard profile — OpenMouse writes it there."
+            : "This mouse stores its polling rate in the onboard profile, so OpenMouse reads it without changing it."
           : undefined,
       },
       batteryPercent: battery.percent,
@@ -524,9 +534,12 @@ export class LogitechHidppClient {
   async setPollingRate(pollingRateHz: number): Promise<number> {
     if (this.isDirectConnect) {
       // 0x8060's setter rejects live writes on this generation (HID++ error
-      // 0x02). The persistent rate lives in the onboard profile, which needs a
-      // CRC-checked sector rewrite that is not implemented here.
-      throw new Error("This mouse stores its polling rate in the onboard profile. Change it in Logitech's own software; OpenMouse can only read it.");
+      // 0x02), and the persistent rate lives in the onboard profile anyway.
+      // Write the active profile's report-rate byte; encodeReportRate validates
+      // the value against the format the mouse reported. This costs one sector
+      // erase/write cycle.
+      await this.writeActiveProfile({ reportRateWiredHz: pollingRateHz });
+      return pollingRateHz;
     }
     if (this.isSuperstrikeDevice && this.device.productId === 0xc0a8 && pollingRateHz > 1000) {
       throw new Error("The Superstrike USB connection supports up to 1000 Hz. Use the Lightspeed receiver for higher rates.");

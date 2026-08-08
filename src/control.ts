@@ -69,6 +69,7 @@ import {
   capabilitiesForFormat,
   clampDpi,
   describeOffset,
+  layoutForFormat,
   reportRatesFor,
   validateProfileName,
   validateReportRate,
@@ -2575,7 +2576,15 @@ function renderProfileRates(): void {
   if (!available || !entry || !rates) return;
 
   const locked = lastProfileFormat?.verified !== true;
-  for (const link of ["wireless", "wired"] as const) {
+  // Base v1 stores a single wired rate; only formats with the field for a link
+  // get a slider for it, so a LOGAN mouse never offers a wireless stop it
+  // cannot store.
+  const layout = lastProfileFormat ? layoutForFormat(lastProfileFormat.id) : null;
+  const links = (["wireless", "wired"] as const).filter((link) => {
+    const offset = link === "wired" ? layout?.reportRateWired : layout?.reportRateWireless;
+    return offset !== null && offset !== undefined;
+  });
+  for (const link of links) {
     const value = stagedProfileRates[link]
       ?? (link === "wired" ? entry.reportRateWired : entry.reportRateWireless);
     renderRateSlider(
@@ -2585,10 +2594,15 @@ function renderProfileRates(): void {
       { label: link === "wired" ? "Wired" : "Wireless", disabled: locked || settingInProgress },
     );
   }
+  for (const link of ["wireless", "wired"] as const) {
+    const slider = document.querySelector<HTMLElement>(`#profile-rate-${link}`);
+    if (slider) slider.hidden = !links.includes(link);
+  }
 
-  setText("#polling-note", `Stored in this profile, one rate per link. Up to ${
-    reportRatesFor(rates, "wireless").at(-1)?.toLocaleString()} Hz wireless, ${
-    reportRatesFor(rates, "wired").at(-1)?.toLocaleString()} Hz over the cable.`);
+  const ceilings = links
+    .map((link) => `${reportRatesFor(rates, link).at(-1)?.toLocaleString() ?? "0"} Hz ${link === "wired" ? "over the cable" : "wireless"}`)
+    .join(" and ");
+  setText("#polling-note", `Stored in this profile. Up to ${ceilings}.`);
 }
 
 function renderDpiSlots(): void {

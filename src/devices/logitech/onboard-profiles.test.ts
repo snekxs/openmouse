@@ -14,6 +14,7 @@ import {
   clampBunnyHopMs,
   clampDpi,
   decodeLiftOffLevel,
+  describeProfileFormat,
   encodeDpiStages,
   encodeProfileName,
   encodeReportRate,
@@ -454,6 +455,43 @@ test("each link's report rate is written without disturbing the other", () => {
   assert.equal(storedCrc(wired), profileCrc(wired));
 
   assert.throws(() => encodeReportRate(SECTOR_3, 7, "wired", 8000), /Wired report rate/);
+});
+
+test("base v1 report rates are encoded as milliseconds, not a table index", () => {
+  // LOGAN stores the USB polling interval in milliseconds, exactly like legacy
+  // 0x8060: 1 ms is 1000 Hz, 2 ms is 500 Hz. The index encoding (0 = 125 Hz,
+  // 3 = 1000 Hz) would write 3 for 1000 Hz and read back as 333 Hz.
+  const sector = new Uint8Array(255).fill(0xff);
+  sector[0x00] = 0x02; // 500 Hz
+  applyCrc(sector);
+
+  const encoded = encodeReportRate(sector, 2, "wired", 1000);
+  assert.equal(encoded[0x00], 0x01, "1 ms must encode 1000 Hz on base v1");
+  assert.equal(decodeOnboardProfile(encoded, 2, { sector: 1, enabled: true }, false).reportRateWired, 1000);
+  assert.equal(storedCrc(encoded), profileCrc(encoded));
+
+  // And back to 500 Hz touches only the rate byte, plus the checksum.
+  const back = encodeReportRate(encoded, 2, "wired", 500);
+  assert.equal(back[0x00], 0x02);
+  for (let index = 1; index < back.length - 2; index += 1) {
+    assert.equal(back[index], encoded[index], `byte 0x${index.toString(16)}`);
+  }
+});
+
+test("format 2 (LOGAN) advertises a writable wired ceiling and no wireless link", () => {
+  const rates = capabilitiesForFormat(2).reportRates;
+  assert.deepEqual(rates, { wirelessMaxHz: 0, wiredMaxHz: 1000 });
+  assert.deepEqual(reportRatesFor(rates, "wired"), [125, 250, 500, 1000]);
+  assert.deepEqual(reportRatesFor(rates, "wireless"), []);
+  assert.equal(validateReportRate(1000, rates, "wired"), null);
+  assert.match(validateReportRate(2000, rates, "wired") ?? "", /Wired report rate/);
+
+  // The report-rate write is the one thing this format is trusted for; the rest
+  // stays locked so a v1 mouse cannot be pushed into unknown fields.
+  assert.equal(describeProfileFormat(2).verified, true);
+  assert.equal(capabilitiesForFormat(2).dpiStages, null);
+  assert.equal(capabilitiesForFormat(2).maxNameLength, null);
+  assert.equal(capabilitiesForFormat(2).bunnyHop, false);
 });
 
 test("profile names round-trip and are held to the region's size", () => {

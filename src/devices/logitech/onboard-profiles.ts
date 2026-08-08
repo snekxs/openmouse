@@ -46,8 +46,14 @@ const PROFILE_FORMAT_NAMES: Record<number, string> = {
  *
  * Add a format here only after a dump from that device decodes sensibly with a
  * matching CRC.
+ *
+ * Format 2 (LOGAN) is trusted only for its report-rate field: the v1 base was
+ * recovered from vendor code, the write sequence is the same one format 7
+ * proved on hardware, and the rate byte decodes back as a polling interval. A
+ * hardware sanity check on a G502/G403-family device is still required before
+ * release — see docs/logitech-onboard-profiles.md.
  */
-const VERIFIED_FORMATS = new Set([7]);
+const VERIFIED_FORMATS = new Set([7, 2]);
 
 export interface ProfileFormat {
   id: number;
@@ -161,6 +167,19 @@ const DEFAULT_FORMAT_CAPABILITIES: ProfileFormatCapabilities = {
 };
 
 const FORMAT_CAPABILITIES: Record<number, ProfileFormatCapabilities> = {
+  // Wired HERO-era mice (G403 HERO, G502 HERO family). Base v1 stores a single
+  // report-rate byte as the USB polling interval in milliseconds, so only the
+  // wired link is writable; there is no radio link, no DPI stage table, no name
+  // region text and no bunny hop on this format. The 1000 Hz ceiling is the
+  // shared USB cap of that generation.
+  2: {
+    supportedLods: ["Medium", "High"],
+    lodEncoding: LOD_ENCODING,
+    dpiStages: null,
+    reportRates: { wirelessMaxHz: 0, wiredMaxHz: 1000 },
+    maxNameLength: null,
+    bunnyHop: false,
+  },
   // Pro X Superlight 2. Three levels, counted from one. Five slots, from the
   // 5x5 stage table in the registration and confirmed against a real profile.
   7: {
@@ -559,7 +578,12 @@ export function encodeReportRate(
   if (offset === null) throw new Error("This profile format has no report-rate setting.");
 
   const result = sector.slice();
-  result[offset] = REPORT_RATE_HZ.indexOf(hz as (typeof REPORT_RATE_HZ)[number]);
+  // Base v1 (formats 1-5) stores the USB polling interval in milliseconds, the
+  // same encoding legacy 0x8060 uses; base v6 and later index the rate table
+  // 0x8061 shares. Writing the wrong one would read back as another rate.
+  result[offset] = profileFormatId < 6
+    ? Math.round(1000 / hz)
+    : REPORT_RATE_HZ.indexOf(hz as (typeof REPORT_RATE_HZ)[number]);
   return applyCrc(result);
 }
 

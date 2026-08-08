@@ -12,6 +12,7 @@ Supported identifiers:
 - `046d:c0a8` — PRO X 2 Superstrike (USB)
 - `046d:c07e` — G402 / G402 Hyperion Fury (wired)
 - `046d:c08f` — G403 HERO (wired)
+- `046d:c08b` — G502 HERO (wired)
 
 ## Receiver-attached and Superstrike devices
 
@@ -60,9 +61,10 @@ with seven 256-byte sectors, so none of the G402's profile offsets apply to it.
    exact multiples on the 50-DPI grid — and that the reported DPI matches G HUB.
 4. Stage a DPI change and flash it. The driver writes `0x2201` function 3 as a
    short request and re-reads the value; a mismatch is reported as an error.
-5. Confirm the polling-rate buttons show the active rate but are **disabled**.
-   The reference trace shows `0x8060` advertising 125/250/500/1000 Hz, and its
-   function 2 is not a verified setter on this generation.
+5. Confirm the polling-rate controls are **enabled** and that changing the rate
+   writes the active onboard profile's report-rate byte (format 2/LOGAN), then
+   reloads as the new rate. The write is the CRC-checked sector rewrite; run the
+   write-probe once on this hardware before release.
 6. Confirm the mouse stays in onboard mode: its own DPI-stage button must keep
    working after OpenMouse writes a DPI value.
 7. Reload the page and confirm the DPI written in step 4 is still reported.
@@ -70,10 +72,21 @@ with seven 256-byte sectors, so none of the G402's profile offsets apply to it.
 RGB lighting (`0x8070`, logo and wheel zones) is deliberately not implemented —
 the write packet is unverified and the panel has no Logitech lighting controls.
 
-Persistent polling-rate and DPI-stage changes need a CRC-checked rewrite of the
-1024-byte profile sector and are intentionally not implemented. Record the
-device identifier, protocol version, and any failing setting in the issue or
-pull request. Do not use factory reset during initial testing.
+Persistent polling-rate changes write the profile sector and are implemented for
+format 2 (LOGAN); DPI-stage changes still are not (the v1 format has no stage
+table). Record the device identifier, protocol version, and any failing setting
+in the issue or pull request. Do not use factory reset during initial testing.
+
+## G502 HERO (direct-connect, HID++ device index `0xFF`)
+
+The wired G502 HERO follows the same direct-connect path as the G403 HERO:
+legacy `0x2201` DPI and `0x8060` report rate, profile format 2 (LOGAN).
+
+1. Repeat the G403 checklist. The polling-rate controls must be enabled and
+   write the active onboard profile's report-rate byte, then reload as the new
+   rate — this is the fix for "cannot click the 1 kHz polling rate option".
+2. Confirm the rate actually changed in the OS (e.g. a mouse-rate tester), not
+   just in the profile read-back, so the reload-on-write behaviour is understood.
 
 ## G309 LIGHTSPEED (receiver-attached, Model ID `B03C40B10000`)
 
