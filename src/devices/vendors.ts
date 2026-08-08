@@ -13,7 +13,15 @@ export const VENDOR_ID = {
   vgn: 0x3554,
   atk: 0x373b,
   finalmouse: 0x361d,
+  keychron: 0x3434,
 } as const;
+
+// Keychron VIA raw HID. 0x0440 is Nape Pro wired; 0xd026/0xd029 are shared Link-KM receivers.
+export const KEYCHRON_PRODUCT_IDS = [0x0440, 0xd026, 0xd029] as const;
+
+export const KEYCHRON_HID_FILTERS: HIDDeviceFilter[] = KEYCHRON_PRODUCT_IDS.map(
+  (productId) => ({ vendorId: VENDOR_ID.keychron, productId, usagePage: 0xff60, usage: 0x61 }),
+);
 
 // Viper V2/V3 Pro expose their control channel as a Generic Desktop Mouse
 // collection. Limit this broad collection filter to known PIDs so it cannot
@@ -126,6 +134,7 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.atk, usagePage: 0xff02, usage: 2 },
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
+  ...KEYCHRON_HID_FILTERS,
   ...EGG_WE_HID_FILTERS,
   ...LOGITECH_RECEIVER_FILTERS,
 ];

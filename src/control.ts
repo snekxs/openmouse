@@ -89,6 +89,7 @@ import { RazerViperV4ProHidClient } from "./devices/razer/viper-v4-pro-hid";
 import { FinalmouseHidClient } from "./devices/finalmouse/hid";
 import { TeevolutionHidClient } from "./devices/teevolution/hid";
 import { VgnF2HidClient } from "./devices/vgn/hid";
+import { KeychronHidClient } from "./devices/keychron/hid";
 import { SUPPORTED_HID_FILTERS } from "./devices/vendors";
 import { WLMouseHidClient } from "./devices/wlmouse/hid";
 import { parsePreviewMode, type PreviewMode } from "./preview-modes";
@@ -139,6 +140,7 @@ const ICON_RUNNING = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none
 const ICON_ACTIVATE = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#77777c" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="5.5"/></svg>`;
 const ICON_DISABLED = `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#77777c" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 8s2.2-4 6-4 6 4 6 4a10 10 0 0 1-1.7 1.9"/><path d="M6.3 11.7A7.6 7.6 0 0 0 8 12"/><path d="m2 2 12 12"/></svg>`;
 let activeFinalmouseClient: FinalmouseHidClient | null = null;
+let activeKeychronClient: KeychronHidClient | null = null;
 let refreshTimer: number | null = null;
 let refreshInProgress = false;
 let dpiOptions: number[] = [];
@@ -178,7 +180,7 @@ async function statusAfterWrite(client: SupportedClient): Promise<MouseStatus> {
 }
 
 function activeSettingsClient(): SupportedClient | null {
-  return activeClient ?? activePulsarClient ?? activeEggClient ?? activeEggWeClient ?? activeFinalmouseClient ?? activeDmClient ?? activeOrbitalClient ?? activeRazerClient ?? activeViperClient ?? activeTeevolutionClient ?? activeVgnClient;
+  return activeClient ?? activePulsarClient ?? activeEggClient ?? activeEggWeClient ?? activeFinalmouseClient ?? activeDmClient ?? activeOrbitalClient ?? activeRazerClient ?? activeViperClient ?? activeTeevolutionClient ?? activeVgnClient ?? activeKeychronClient;
 }
 
 function hasActiveClient(): boolean {
@@ -1485,6 +1487,7 @@ async function activateClient(client: SupportedClient): Promise<void> {
   activeViperClient = null;
   if (activeDevice !== client.device) onboardProfiles = null;
   activeFinalmouseClient = null;
+  activeKeychronClient = null;
   activeDevice = client.device;
   recordDiagnosticCommand("Read device status");
   lastRenderedStatusKey = null;
@@ -1564,6 +1567,13 @@ async function activateClient(client: SupportedClient): Promise<void> {
     dpiOptions = client.getDpiOptions();
     configureDpiControl(status.dpi);
     showStatus(status);
+  } else if (client instanceof KeychronHidClient) {
+    activeKeychronClient = client;
+    const status = await client.readStatus();
+    deviceStatuses.set(client.device, status);
+    dpiOptions = client.getDpiOptions();
+    configureDpiControl(status.dpi);
+    showStatus(status);
   } else {
     activePulsarClient = client;
     await showPulsarExplorer(client);
@@ -1590,6 +1600,7 @@ function showDisconnectedState(): void {
   activeVgnClient = null;
   activeViperClient = null;
   activeFinalmouseClient = null;
+  activeKeychronClient = null;
   activeDevice = null;
   onboardProfiles = null;
   lastRenderedStatusKey = null;
@@ -3412,6 +3423,7 @@ window.addEventListener("beforeunload", (event) => {
   void activeVgnClient?.close();
   void activeViperClient?.close();
   void activeFinalmouseClient?.close();
+  void activeKeychronClient?.close();
 });
 
 function isChromium(): boolean {
