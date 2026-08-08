@@ -1,5 +1,8 @@
 import { EGG_WE_HID_FILTERS } from "./endgame/egg-we-control.ts";
-import { LOGITECH_DIRECT_PRODUCT_IDS } from "./logitech/protocol.ts";
+import {
+  LOGITECH_BOLT_PRODUCT_IDS,
+  LOGITECH_DIRECT_PRODUCT_IDS,
+} from "./logitech/protocol.ts";
 
 export const VENDOR_ID = {
   pulsar: 0x3710,
@@ -53,14 +56,21 @@ export const RAZER_DEATHADDER_ESSENTIAL_FILTERS: HIDDeviceFilter[] = [0x006e, 0x
 
 export const TEEVOLUTION_PRODUCT_IDS = [0xf520, 0xf523, 0xf5bb, 0xf522] as const;
 
-// Logitech HID++ control interfaces addressed through a receiver slot (HID++
-// device index 0x01). 0xc54d and 0xc547 are newer Lightspeed receivers, 0xc539
-// is HERO-era Lightspeed, and 0xc0a8 is the PRO X 2 Superstrike USB interface.
-export const LOGITECH_RECEIVER_PRODUCT_IDS = [0xc54d, 0xc539, 0xc0a8, 0xc547] as const;
+// Logitech HID++ control interfaces addressed through a receiver slot.
+// 0xc54d and 0xc547 are newer Lightspeed receivers, 0xc539 is HERO-era
+// Lightspeed, 0xc0a8 is the PRO X 2 Superstrike USB interface, and Bolt
+// product ids live in ./logitech/protocol with the direct-connect list.
+export const LOGITECH_RECEIVER_PRODUCT_IDS = [
+  0xc54d,
+  0xc539,
+  0xc0a8,
+  0xc547,
+  ...LOGITECH_BOLT_PRODUCT_IDS,
+] as const;
 
 // Every Logitech product with an HID++ control interface, receiver-addressed or
-// not. Direct-connect product IDs live in ./logitech/protocol so the driver and
-// these filters cannot disagree about which index a mouse answers on.
+// not. Direct-connect and Bolt product IDs live in ./logitech/protocol so the
+// driver and these filters cannot disagree about which index a mouse answers on.
 export const LOGITECH_PRODUCT_IDS = [
   ...LOGITECH_RECEIVER_PRODUCT_IDS,
   ...LOGITECH_DIRECT_PRODUCT_IDS,
@@ -68,13 +78,14 @@ export const LOGITECH_PRODUCT_IDS = [
 
 /**
  * Every Logitech HID++ control interface, not only the product ids listed
- * above: a mouse we have never seen should still be offered. The usage page
- * keeps this to HID++ endpoints, but it cannot tell a mouse from a keyboard or
- * a headset — the driver decides that after connecting, by looking for a sensor
- * feature, and reports a clear message when there is none.
+ * above: a mouse we have never seen should still be offered. Usage 1 is the
+ * short-report HID++ collection used by Lightspeed and for Bolt receiver
+ * registers; usage 2 is the long-report collection Bolt mice need for HID++
+ * 2.0 feature traffic. The driver decides mouse-vs-keyboard after connecting.
  */
 export const LOGITECH_RECEIVER_FILTERS: HIDDeviceFilter[] = [
   { vendorId: VENDOR_ID.logitech, usagePage: 0xff00, usage: 0x0001 },
+  { vendorId: VENDOR_ID.logitech, usagePage: 0xff00, usage: 0x0002 },
 ];
 
 // Retained for existing imports; points at the first supported receiver.

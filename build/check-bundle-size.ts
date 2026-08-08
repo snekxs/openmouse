@@ -7,9 +7,10 @@ const BUDGET_BYTES: Record<string, number> = {
   ".css": 46_000,
   // Raised from 280 kB for the production Logitech onboard-profile codec,
   // guarded flash editor, verification exporter, upstream Finalmouse driver,
-  // the dedicated Viper Mini protocol driver, and Viper V3 sleep/low-power plus
-  // asymmetric lift-off protocol and controls. Preview fixtures remain dev-only.
-  ".js": 325_000,
+  // the dedicated Viper Mini protocol driver, Viper V3 sleep/low-power plus
+  // asymmetric lift-off protocol and controls, and Logi Bolt / MX Master 3S
+  // transport. Preview fixtures remain dev-only.
+  ".js": 330_000,
 };
 
 const ASSETS = join("dist", "assets");

@@ -1,6 +1,7 @@
 import {
   eggWeMergeLogicalDevices,
 } from "./devices/endgame/egg-we-control";
+import { collapseBoltPeers } from "./devices/logitech/bolt";
 import {
   clientSupportScore,
   createSupportedClient,
@@ -13,5 +14,6 @@ export { clientSupportScore, createSupportedClient, deviceBrand, type PulsarClie
 
 /** Supported devices for the sidebar; multi-path drivers collapse via their module. */
 export function listLogicalDevices(devices: HIDDevice[] = []): HIDDevice[] {
-  return eggWeMergeLogicalDevices(devices, (device) => createSupportedClient(device) !== null);
+  const afterEgg = eggWeMergeLogicalDevices(devices, (device) => createSupportedClient(device) !== null);
+  return collapseBoltPeers(afterEgg);
 }

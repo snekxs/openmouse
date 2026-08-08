@@ -1,18 +1,34 @@
 import type { MouseStatus } from "../mouse-types.ts";
+import { LOGITECH_RECEIVER_PRODUCT_IDS } from "../vendors.ts";
 import {
-  DEVICE_INDEX_DIRECT,
-  DEVICE_INDEX_RECEIVER,
+  BOLT_INDEX_PROBE_TIMEOUT_MS,
+  boltSupportScore,
+  classifyHidpp20Probe,
+  collapseBoltPeers,
+  hasHidppLongCollection,
+  hasHidppShortCollection,
+  hidppIndexCandidates,
+  resolveBoltReportDevice,
+} from "./bolt.ts";
+import {
   decodeBatteryLevelState,
   decodeReportRateBitmap,
   decodeUnifiedBatteryState,
   hidppDeviceIndex,
   hidppErrorForRequest,
+  isBoltReceiverProduct,
   isDirectConnection,
   isDirectConnectProduct,
   OnboardOnlyError,
   legacyDpiFallback,
   withSoftwareId,
 } from "./protocol.ts";
+
+export {
+  collapseBoltPeers,
+  hasHidppLongCollection,
+  hasHidppShortCollection,
+} from "./bolt.ts";
 import {
   MODE_STATUS,
   buildModeStatusWriteMany,
@@ -118,8 +134,7 @@ export class NotAMouseError extends Error {
 }
 
 const LOGITECH_VENDOR_ID = 0x046d;
-// HID++ control interfaces, including the PRO X 2 Superstrike USB interface.
-const LOGITECH_RECEIVER_PRODUCT_IDS = new Set([0xc54d, 0xc539, 0xc0a8, 0xc547]);
+const KNOWN_RECEIVER_PRODUCT_IDS: ReadonlySet<number> = new Set(LOGITECH_RECEIVER_PRODUCT_IDS);
 
 /**
  * Models whose 0x8090 mode-status feature drives the power-mode switch only.
@@ -148,6 +163,7 @@ export function hasLiftOffControl(legacyDpi: boolean, lodByte: number | null): b
 
 const SHORT_REPORT_ID = 0x10;
 const LONG_REPORT_ID = 0x11;
+const REQUEST_TIMEOUT_MS = 6000;
 const FEATURE = {
   deviceName: 0x0005,
   firmware: 0x0003,
@@ -227,6 +243,12 @@ export class LogitechHidppClient {
   private lodCapabilities: ProfileFormatCapabilities = capabilitiesForFormat(null);
   private supportedLods: Array<NonNullable<LogitechMouseStatus["liftOffDistance"]>> = ["Medium", "High"];
   private readonly rateChangeWaiters: Array<{ rate: number; resolve: () => void; reject: (reason: Error) => void }> = [];
+  /**
+   * Device used for HID++ feature sendReport. On Bolt this is the long-report
+   * collection (usage 2); elsewhere it is `device` itself.
+   */
+  private ioDevice: HIDDevice | null = null;
+  private listeningDevices = new Set<HIDDevice>();
   private readonly onInputReport = (event: HIDInputReportEvent): void => {
     if (event.reportId !== SHORT_REPORT_ID && event.reportId !== LONG_REPORT_ID) {
       return;
@@ -290,45 +312,61 @@ export class LogitechHidppClient {
     return isDirectConnection(this.device.productId, this.resolvedDeviceIndex);
   }
 
-  /** HID++ device index: the receiver's first slot, or the mouse itself. */
+  private get isBoltReceiver(): boolean {
+    return isBoltReceiverProduct(this.device.productId);
+  }
+
+  /** HID++ device index: a receiver pairing slot, or the mouse itself. */
   private get deviceIndex(): number {
     return this.resolvedDeviceIndex ?? hidppDeviceIndex(this.device.productId);
+  }
+
+  private get reportDevice(): HIDDevice {
+    return this.ioDevice ?? this.device;
   }
 
   /**
    * Finds which HID++ device index this connection answers on.
    *
-   * A mouse reached through its receiver answers on the receiver's pairing slot
-   * (0x01); the same mouse plugged in by cable answers as itself (0xFF). That
-   * cannot be read from the descriptors, and deriving it from a list of product
-   * ids only works for the handful of ids on the list — every other mouse
-   * plugged in directly was addressed as a receiver and never replied.
+   * A mouse reached through its receiver answers on a pairing slot (usually
+   * 0x01 on Lightspeed; any of 1..6 on Bolt). The same mouse plugged in by
+   * cable answers as itself (0xFF). That cannot be read from the descriptors.
    *
-   * So ask. The root feature query is the cheapest request there is, and the
-   * wrong index simply times out.
+   * Only a HID++ 2.0 reply (success or 2.0 error) counts. Bolt receivers answer
+   * HID++ 1.0 errors on empty slots and on 0xFF; treating those as "answered"
+   * made OpenMouse lock onto the receiver and report "invalid command".
    */
   private async resolveDeviceIndex(): Promise<void> {
     if (this.resolvedDeviceIndex !== null) return;
-    // Only a receiver forwards to a pairing slot; anything else is the mouse's
-    // own endpoint and answers as itself. Ordering by "is this a known
-    // receiver" rather than by the direct-connect id list matters for mice that
-    // are on neither list — a wired G102 is its own endpoint, and asking it as
-    // though it were behind a receiver is what made it look mode-locked.
-    const candidates = LOGITECH_RECEIVER_PRODUCT_IDS.has(this.device.productId)
-      ? [DEVICE_INDEX_RECEIVER, DEVICE_INDEX_DIRECT]
-      : [DEVICE_INDEX_DIRECT, DEVICE_INDEX_RECEIVER];
+    const candidates = hidppIndexCandidates(this.device.productId, KNOWN_RECEIVER_PRODUCT_IDS);
 
     for (const candidate of candidates) {
       this.resolvedDeviceIndex = candidate;
-      // Any reply at all proves something is listening, including a HID++
-      // error reply. Only silence rules the index out.
-      const answered = await this.request(0x00, 0x00, FEATURE.firmware >> 8, FEATURE.firmware & 0xff)
-        .then(() => true)
-        .catch((error: unknown) => !(error instanceof HidppTimeoutError));
-      if (answered) return;
+      const outcome = await this.probeHidpp20Root();
+      if (outcome === "hidpp20") return;
     }
     this.resolvedDeviceIndex = null;
-    throw new Error("The mouse did not answer on any HID++ device index.");
+    throw new Error(this.isBoltReceiver
+      ? "No mouse answered on this Logi Bolt receiver. Move the mouse, then try again. Close Logi Options+ if it is open."
+      : "The mouse did not answer on any HID++ device index.");
+  }
+
+  /**
+   * Root getFeature(firmware): distinguishes a HID++ 2.0 device from receiver
+   * HID++ 1.0 noise and from empty pairing slots.
+   */
+  private async probeHidpp20Root(): Promise<"hidpp20" | "absent"> {
+    try {
+      await this.requestWithOptions(
+        0x00,
+        0x00,
+        [FEATURE.firmware >> 8, FEATURE.firmware & 0xff],
+        { timeoutMs: this.isBoltReceiver ? BOLT_INDEX_PROBE_TIMEOUT_MS : REQUEST_TIMEOUT_MS },
+      );
+      return "hidpp20";
+    } catch (error: unknown) {
+      return classifyHidpp20Probe(error, error instanceof HidppTimeoutError);
+    }
   }
 
   /**
@@ -339,17 +377,26 @@ export class LogitechHidppClient {
    */
   static isSupported(device: HIDDevice): boolean {
     if (device.vendorId !== LOGITECH_VENDOR_ID) return false;
-    const hasHidppCollection = (collections: readonly HIDCollectionInfo[]): boolean =>
-      collections.some((collection) =>
-        (collection.usagePage === 0xff00 && collection.usage === 0x0001)
-        || hasHidppCollection(collection.children));
-    return hasHidppCollection(device.collections);
+    return hasHidppShortCollection(device) || hasHidppLongCollection(device);
+  }
+
+  /**
+   * Prefer Bolt's long-report collection when both HID++ endpoints are present
+   * so feature traffic lands on the interface that can carry it.
+   */
+  static supportScore(device: HIDDevice): number {
+    return boltSupportScore(device, this.isSupported(device));
+  }
+
+  /** @see collapseBoltPeers */
+  static collapseBoltPeers(devices: readonly HIDDevice[]): HIDDevice[] {
+    return collapseBoltPeers(devices);
   }
 
   /** Known receivers, kept as the fast path for the WebHID picker's filters. */
   static isKnownReceiver(device: HIDDevice): boolean {
     return device.vendorId === LOGITECH_VENDOR_ID
-      && (LOGITECH_RECEIVER_PRODUCT_IDS.has(device.productId) || isDirectConnectProduct(device.productId));
+      && (KNOWN_RECEIVER_PRODUCT_IDS.has(device.productId) || isDirectConnectProduct(device.productId));
   }
 
   static async requestReceiver(): Promise<LogitechHidppClient | null> {
@@ -358,14 +405,15 @@ export class LogitechHidppClient {
     }
 
     const devices = await navigator.hid.requestDevice({
-      filters: [...LOGITECH_RECEIVER_PRODUCT_IDS].map((productId) => ({
-        vendorId: LOGITECH_VENDOR_ID,
-        productId,
-        usagePage: 0xff00,
-        usage: 0x0001,
-      })),
+      filters: [...LOGITECH_RECEIVER_PRODUCT_IDS].flatMap((productId) => [
+        { vendorId: LOGITECH_VENDOR_ID, productId, usagePage: 0xff00, usage: 0x0001 },
+        { vendorId: LOGITECH_VENDOR_ID, productId, usagePage: 0xff00, usage: 0x0002 },
+      ]),
     });
-    const device = devices[0];
+    const ranked = [...devices]
+      .filter((device) => this.isSupported(device))
+      .sort((left, right) => this.supportScore(right) - this.supportScore(left));
+    const device = ranked[0];
     return device ? new LogitechHidppClient(device) : null;
   }
 
@@ -374,8 +422,11 @@ export class LogitechHidppClient {
       return null;
     }
 
-    const devices = await navigator.hid.getDevices();
-    const device = devices.find((candidate) => this.isSupported(candidate));
+    const devices = this.collapseBoltPeers(
+      (await navigator.hid.getDevices()).filter((candidate) => this.isSupported(candidate)),
+    );
+    const ranked = [...devices].sort((left, right) => this.supportScore(right) - this.supportScore(left));
+    const device = ranked[0];
     return device ? new LogitechHidppClient(device) : null;
   }
 
@@ -428,12 +479,18 @@ export class LogitechHidppClient {
     const supportsSeparateDpiAxes = dpiFeature.legacy
       ? false
       : await this.readDpiCapabilities(dpiFeature.index);
-    const supportedPollingRates = reportRateFeature.legacy
-      ? await this.readLegacyReportRates(reportRateFeature.index)
-      : await this.readSupportedPollingRates(reportRateFeature.index);
-    const pollingRateHz = reportRateFeature.legacy
-      ? await this.readLegacyReportRate(reportRateFeature.index)
-      : await this.readPollingRate(reportRateFeature.index);
+    // Productivity Bolt mice (MX Master 3S) expose DPI and battery but no
+    // 0x8060/0x8061 report-rate feature. Skip rather than throwing.
+    const supportedPollingRates = reportRateFeature.index
+      ? reportRateFeature.legacy
+        ? await this.readLegacyReportRates(reportRateFeature.index)
+        : await this.readSupportedPollingRates(reportRateFeature.index)
+      : [];
+    const pollingRateHz = reportRateFeature.index
+      ? reportRateFeature.legacy
+        ? await this.readLegacyReportRate(reportRateFeature.index)
+        : await this.readPollingRate(reportRateFeature.index)
+      : 0;
     const profileState = await this.readProfileState(profilesFeature.index);
     const firmware = await this.readFirmware(firmwareFeature.index);
     const analogButtonTuning = analogButtonsFeature.index
@@ -466,10 +523,14 @@ export class LogitechHidppClient {
         lodRequiresSurface: true,
         // Direct-connect mice report their rate but keep the writable copy in
         // the onboard profile, so show it without offering to change it.
-        pollingReadOnly: this.isDirectConnect ? true : undefined,
+        // Bolt productivity mice often expose no report-rate feature at all.
+        pollingReadOnly: this.isDirectConnect || !reportRateFeature.index ? true : undefined,
         pollingNote: this.isDirectConnect
           ? "This mouse stores its polling rate in the onboard profile, so OpenMouse reads it without changing it."
-          : undefined,
+          : !reportRateFeature.index
+            ? "This mouse does not expose a HID++ polling-rate control."
+            : undefined,
+        hideUnsupportedPollingRates: !reportRateFeature.index ? true : undefined,
       },
       batteryPercent: battery.percent,
       batteryVoltageMv: battery.voltageMv ?? null,
@@ -503,8 +564,13 @@ export class LogitechHidppClient {
       supportedLiftOffDistances: hasLiftOffControl(dpiFeature.legacy, dpiState.lod) ? this.supportedLods : [],
       connectionType: wired ? "Wired" : "Wireless",
       // Without this the shell falls back to its "2.4 GHz receiver" wording,
-      // which is wrong for a mouse plugged straight into USB.
-      connectionDetail: this.isDirectConnect ? "Wired USB" : undefined,
+      // which is wrong for a mouse plugged straight into USB, and imprecise
+      // for Logi Bolt (BLE-based) versus Lightspeed.
+      connectionDetail: this.isDirectConnect
+        ? "Wired USB"
+        : this.isBoltReceiver
+          ? "Logi Bolt"
+          : undefined,
       activeProfile: profileState.activeProfile,
       deviceMode: profileState.deviceMode,
       unitId: identity.unitId,
@@ -515,10 +581,14 @@ export class LogitechHidppClient {
   }
 
   async close(): Promise<void> {
-    this.device.removeEventListener("inputreport", this.onInputReport);
-    if (this.device.opened) {
-      await this.device.close();
+    for (const device of this.listeningDevices) {
+      device.removeEventListener("inputreport", this.onInputReport);
+      if (device.opened) {
+        await device.close().catch(() => undefined);
+      }
     }
+    this.listeningDevices.clear();
+    this.ioDevice = null;
   }
 
   async setPollingRate(pollingRateHz: number): Promise<number> {
@@ -1231,10 +1301,24 @@ export class LogitechHidppClient {
   }
 
   private async open(): Promise<void> {
-    if (!this.device.opened) {
-      await this.device.open();
+    await this.bindBoltIoDevice();
+    const devices = new Set<HIDDevice>([this.device, this.reportDevice]);
+    for (const device of devices) {
+      if (!device.opened) {
+        await device.open();
+      }
+      if (!this.listeningDevices.has(device)) {
+        device.addEventListener("inputreport", this.onInputReport);
+        this.listeningDevices.add(device);
+      }
     }
-    this.device.addEventListener("inputreport", this.onInputReport);
+  }
+
+  private async bindBoltIoDevice(): Promise<void> {
+    const peers = typeof navigator !== "undefined" && navigator.hid
+      ? await navigator.hid.getDevices()
+      : [];
+    this.ioDevice = resolveBoltReportDevice(this.device, peers);
   }
 
   /** Prefer extended DPI (0x2202); fall back to legacy Adjustable DPI (0x2201). */
@@ -1631,6 +1715,21 @@ export class LogitechHidppClient {
   }
 
   private async request(featureIndex: number, functionId: number, ...parameters: number[]): Promise<Uint8Array> {
+    return this.requestWithOptions(featureIndex, functionId, parameters);
+  }
+
+  private async requestWithOptions(
+    featureIndex: number,
+    functionId: number,
+    parameters: number[],
+    options: { timeoutMs?: number } = {},
+  ): Promise<Uint8Array> {
+    // Bolt feature traffic only answers on long reports. Lightspeed and wired
+    // mice keep the short form for the three-parameter path they were verified
+    // with; longer payloads still go through requestLong.
+    if (this.isBoltReceiver) {
+      return this.requestLong(featureIndex, functionId, parameters, options.timeoutMs);
+    }
     if (parameters.length > 3) {
       throw new Error("This WebHID client only sends short, read-only HID++ requests.");
     }
@@ -1643,16 +1742,21 @@ export class LogitechHidppClient {
       parameters[1] ?? 0,
       parameters[2] ?? 0,
     ]);
-    const response = this.waitForResponse(featureIndex, functionId);
+    const response = this.waitForResponse(featureIndex, functionId, options.timeoutMs);
     // Keep the timeout rejection observed even when sendReport itself fails
     // (for example, when a browser selected a protected mouse collection).
     // The original sendReport error is then shown by the control panel.
     void response.catch(() => undefined);
-    await this.device.sendReport(SHORT_REPORT_ID, report);
+    await this.reportDevice.sendReport(SHORT_REPORT_ID, report);
     return await response;
   }
 
-  private async requestLong(featureIndex: number, functionId: number, parameters: number[]): Promise<Uint8Array> {
+  private async requestLong(
+    featureIndex: number,
+    functionId: number,
+    parameters: number[],
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<Uint8Array> {
     if (parameters.length > 16) {
       throw new Error("HID++ long requests support at most 16 parameter bytes.");
     }
@@ -1661,13 +1765,17 @@ export class LogitechHidppClient {
     report[1] = featureIndex;
     report[2] = withSoftwareId(functionId);
     report.set(parameters, 3);
-    const response = this.waitForResponse(featureIndex, functionId);
+    const response = this.waitForResponse(featureIndex, functionId, timeoutMs);
     void response.catch(() => undefined);
-    await this.device.sendReport(LONG_REPORT_ID, report);
+    await this.reportDevice.sendReport(LONG_REPORT_ID, report);
     return await response;
   }
 
-  private waitForResponse(featureIndex: number, functionId: number): Promise<Uint8Array> {
+  private waitForResponse(
+    featureIndex: number,
+    functionId: number,
+    timeoutMs = REQUEST_TIMEOUT_MS,
+  ): Promise<Uint8Array> {
     return new Promise<Uint8Array>((resolve, reject) => {
       const timeout = window.setTimeout(() => {
         const index = this.waiters.findIndex((waiter) => waiter.reject === reject);
@@ -1676,8 +1784,10 @@ export class LogitechHidppClient {
         }
         reject(new HidppTimeoutError(this.isDirectConnect
           ? "The mouse did not answer. Close Logitech G HUB or Logitech Gaming Software, then try again."
-          : "The mouse did not answer. Move it or click a button, then try again."));
-      }, 6000);
+          : this.isBoltReceiver
+            ? "The mouse did not answer. Move it, close Logi Options+, then try again."
+            : "The mouse did not answer. Move it or click a button, then try again."));
+      }, timeoutMs);
 
       this.waiters.push({
         featureIndex,

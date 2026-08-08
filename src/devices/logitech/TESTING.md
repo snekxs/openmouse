@@ -9,9 +9,15 @@ Supported identifiers:
 
 - `046d:c54d`, `046d:c547` — Lightspeed receivers
 - `046d:c539` — HERO-era Lightspeed receiver
+- `046d:c548` — Logi Bolt receiver (MX Master 3S and other Bolt mice)
 - `046d:c0a8` — PRO X 2 Superstrike (USB)
 - `046d:c07e` — G402 / G402 Hyperion Fury (wired)
 - `046d:c08f` — G403 HERO (wired)
+
+For Logi Bolt, authorize **both** HID++ collections when the picker offers them
+(`usagePage 0xff00`, `usage 0x0001` and `usage 0x0002`). Device feature traffic
+uses the long-report collection (`usage 0x0002`). Close Logi Options+ first —
+it holds the same vendor interface.
 
 ## Receiver-attached and Superstrike devices
 
@@ -90,3 +96,20 @@ hidden.
    the LightForce switch are all hidden.
 3. Change the DPI and polling rate and confirm each write persists after a
    reload.
+
+## MX Master 3S (Logi Bolt `046d:c548`, WPID `B034`)
+
+The MX Master 3S pairs to a Logi Bolt receiver. HID++ 2.0 feature calls use
+**long** reports on pairing slot 1–6 (often slot 2), not device index `0xFF`.
+It exposes Adjustable DPI `0x2201` and Unified Battery `0x1004`, and has no
+`0x8060`/`0x8061` report-rate feature and no lift-off / onboard-profile path.
+
+1. Close Logi Options+. Authorize both Bolt HID++ collections if offered.
+2. Confirm the sidebar shows the Bolt receiver / MX Master 3S, connection
+   **Wireless**, battery percentage, and DPI.
+3. Confirm the sensor (lift-off) card and polling-rate buttons stay inactive /
+   noted as unavailable — this mouse has no HID++ polling control.
+4. Stage a DPI change and flash it. Confirm read-back matches and the value
+   persists after a reload.
+5. If connect fails with "invalid command", the short collection alone was
+   selected — reconnect and include usage `0x0002`.
