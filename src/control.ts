@@ -88,6 +88,7 @@ import { RazerViperMiniHidClient } from "./devices/razer/viper-mini-hid";
 import { RazerViperV4ProHidClient } from "./devices/razer/viper-v4-pro-hid";
 import { FinalmouseHidClient } from "./devices/finalmouse/hid";
 import { TeevolutionHidClient } from "./devices/teevolution/hid";
+import { teevolutionProfileForCid, teevolutionSensorModeUi } from "./devices/teevolution/protocol.ts";
 import { VgnF2HidClient } from "./devices/vgn/hid";
 import { SUPPORTED_HID_FILTERS } from "./devices/vendors";
 import { WLMouseHidClient } from "./devices/wlmouse/hid";
@@ -392,6 +393,9 @@ function renderControl(): void {
     toggleSleep: (enabled) => applyPulsarValue("sleep", enabled ? lastSleepSeconds : WLMOUSE_SLEEP_NEVER),
     applyLowPowerThreshold,
     applyPulsarToggle,
+    applyTeevolutionSensorMode,
+    applyTeevolutionPerformanceDuration,
+    applyTeevolutionDpiLighting,
     applyEggFilter,
     applyEggSpdtMode,
     applyEggCpiLevels,
@@ -679,7 +683,11 @@ function sleepLabel(seconds: number): string {
 }
 
 function fillSleepOptions(options: ReadonlyArray<readonly [number, string]>): void {
-  const select = document.querySelector<HTMLSelectElement>("#sleep-select");
+  fillSelectOptions("#sleep-select", options);
+}
+
+function fillSelectOptions(selector: string, options: ReadonlyArray<readonly [number, string]>): void {
+  const select = document.querySelector<HTMLSelectElement>(selector);
   const signature = options.map(([value]) => value).join(",");
   if (!select || select.dataset.options === signature) return;
   select.replaceChildren(...options.map(([value, label]) => new Option(label, String(value))));
@@ -1169,6 +1177,70 @@ function showStatus(deviceStatus: MouseStatus): void {
     setToggleValue("#angle-snapping-toggle", status.angleSnapping);
     setToggleValue("#ripple-control-toggle", status.rippleControl);
     setToggleValue("#performance-mode-toggle", status.performanceMode);
+    const isTeevolution = status.brand === "Teevolution";
+    const performanceModeLabel = document.querySelector<HTMLElement>("#performance-mode-label");
+    if (performanceModeLabel) performanceModeLabel.textContent = isTeevolution ? "Highest performance" : "Performance mode";
+    const teevolutionSensorRow = document.querySelector<HTMLElement>("#teevolution-sensor-mode-row");
+    const teevolutionDurationRow = document.querySelector<HTMLElement>("#teevolution-performance-duration-row");
+    const teevolutionDpiLighting = document.querySelector<HTMLElement>("#teevolution-dpi-lighting");
+    if (teevolutionSensorRow) teevolutionSensorRow.hidden = !isTeevolution;
+    if (teevolutionDurationRow) teevolutionDurationRow.hidden = !isTeevolution;
+    if (teevolutionDpiLighting) teevolutionDpiLighting.hidden = !isTeevolution;
+    const teevolutionProfile = activeTeevolutionClient?.getModelProfile() ?? teevolutionProfileForCid(14);
+    if (isTeevolution && status.connectionType && teevolutionProfile) {
+      const profile = teevolutionProfile;
+      fillSleepOptions(profile.sleepOptions.map((value) => [value, sleepLabel(value * 10)] as const));
+      fillDebounceOptions(profile.debounce.max);
+      const performanceDurations = profile.performanceTimeOptions
+        .map((value) => [value, sleepLabel(value * 10)] as const);
+      fillSelectOptions("#teevolution-performance-duration", performanceDurations);
+      const sensorUi = teevolutionSensorModeUi({
+        storedMode: status.sensorModeStored ?? 0,
+        pollingRateHz: status.pollingRateHz,
+        connection: status.connectionType,
+      });
+      const sensorSelect = document.querySelector<HTMLSelectElement>("#teevolution-sensor-mode");
+      if (sensorSelect) {
+        for (const option of sensorSelect.options) {
+          option.hidden = option.value !== "Ultra"
+            && !profile.sensorModes.includes(option.value as "Eco" | "High");
+        }
+        sensorSelect.value = sensorUi.mode;
+        sensorSelect.disabled = !sensorUi.editable;
+      }
+      setText("#teevolution-sensor-mode-note", sensorUi.editable
+        ? "Eco saves power at 125–1000 Hz wireless. High uses the performance sensor profile."
+        : `Locked to ${sensorUi.mode} at ${status.pollingRateHz.toLocaleString()} Hz ${status.connectionType.toLowerCase()}.`);
+      const durationSelect = document.querySelector<HTMLSelectElement>("#teevolution-performance-duration");
+      if (durationSelect) {
+        durationSelect.disabled = status.performanceMode !== true;
+        setControlValue("#teevolution-performance-duration", status.performanceDuration);
+      }
+      const lightMode = status.dpiLedMode ?? 0;
+      const lightModeSelect = document.querySelector<HTMLSelectElement>("#teevolution-dpi-light-mode");
+      if (lightModeSelect) {
+        for (const option of lightModeSelect.options) {
+          option.hidden = !profile.dpiLighting.modes.includes(Number(option.value) as 0 | 1 | 2);
+        }
+      }
+      setControlValue("#teevolution-dpi-light-mode", lightMode);
+      setControlValue("#teevolution-dpi-light-brightness", status.dpiLedBrightness);
+      setControlValue("#teevolution-dpi-light-speed", status.dpiLedSpeed);
+      setText("#teevolution-dpi-light-brightness-output", status.dpiLedBrightness == null ? "—" : String(status.dpiLedBrightness));
+      setText("#teevolution-dpi-light-speed-output", status.dpiLedSpeed == null ? "—" : String(status.dpiLedSpeed));
+      const brightness = document.querySelector<HTMLInputElement>("#teevolution-dpi-light-brightness");
+      const speed = document.querySelector<HTMLInputElement>("#teevolution-dpi-light-speed");
+      if (brightness) {
+        brightness.min = String(profile.dpiLighting.brightness.min);
+        brightness.max = String(profile.dpiLighting.brightness.max);
+        brightness.disabled = lightMode !== 1 || status.dpiLedBrightness == null;
+      }
+      if (speed) {
+        speed.min = String(profile.dpiLighting.speed.min);
+        speed.max = String(profile.dpiLighting.speed.max);
+        speed.disabled = lightMode !== 2 || status.dpiLedSpeed == null;
+      }
+    }
     for (const selector of ["#angle-snapping-toggle", "#ripple-control-toggle"] as const) {
       const row = document.querySelector<HTMLElement>(selector)?.closest<HTMLElement>(".switch-row");
       if (row) {
@@ -3126,8 +3198,75 @@ function settingLabel(setting: PulsarToggleSetting): string {
     motionSync: "Motion Sync",
     angleSnapping: "angle snapping",
     rippleControl: "ripple control",
-    performanceMode: "performance mode",
+    performanceMode: activeTeevolutionClient ? "highest performance" : "performance mode",
   } as const)[setting];
+}
+
+function applyTeevolutionSensorMode(mode: NonNullable<MouseStatus["sensorMode"]>): void {
+  if (!activeTeevolutionClient) return;
+  stageChange({
+    key: "teevolution-sensor-mode",
+    label: `Sensor mode ${mode}`,
+    command: `Set sensor mode to ${mode}`,
+    progress: `Setting sensor mode to ${mode}…`,
+    preview: (status) => {
+      status.sensorMode = mode;
+      status.sensorModeStored = mode === "High" ? 1 : 0;
+    },
+    apply: async () => {
+      await requireClientMethod("setSensorMode", "sensor mode").setSensorMode(mode);
+    },
+  });
+}
+
+function applyTeevolutionPerformanceDuration(duration: number): void {
+  if (!activeTeevolutionClient) return;
+  const label = sleepLabel(duration * 10);
+  stageChange({
+    key: "teevolution-performance-duration",
+    label: `Highest performance ${label}`,
+    command: `Set highest-performance duration to ${label}`,
+    progress: "Setting highest-performance duration…",
+    preview: (status) => {
+      status.performanceDuration = duration;
+    },
+    apply: async () => {
+      await requireClientMethod("setPerformanceDuration", "highest-performance duration").setPerformanceDuration(duration);
+    },
+  });
+}
+
+const TEEVOLUTION_DPI_LIGHT_GROUP = "teevolution-dpi-lighting";
+
+async function writeStagedTeevolutionDpiLighting(): Promise<void> {
+  if (!activeTeevolutionClient || !latestDeviceStatus) {
+    throw new Error("The Teevolution mouse is no longer connected.");
+  }
+  const status = withPendingChanges(latestDeviceStatus);
+  await activeTeevolutionClient.setDpiLighting(
+    status.dpiLedMode ?? 0,
+    status.dpiLedBrightness ?? 5,
+    status.dpiLedSpeed ?? 3,
+  );
+}
+
+function applyTeevolutionDpiLighting(setting: "mode" | "brightness" | "speed", value: number): void {
+  if (!activeTeevolutionClient) return;
+  const names = { mode: "effect", brightness: "brightness", speed: "speed" } as const;
+  const display = setting === "mode" ? (["Off", "Steady", "Breathing"][value] ?? `${value}`) : `${value}`;
+  stageChange({
+    key: `teevolution-dpi-light-${setting}`,
+    group: TEEVOLUTION_DPI_LIGHT_GROUP,
+    label: `DPI light ${names[setting]} ${display}`,
+    command: `Set DPI light ${names[setting]} to ${display}`,
+    progress: `Setting DPI light ${names[setting]}…`,
+    preview: (status) => {
+      if (setting === "mode") status.dpiLedMode = value;
+      if (setting === "brightness") status.dpiLedBrightness = value;
+      if (setting === "speed") status.dpiLedSpeed = value;
+    },
+    apply: writeStagedTeevolutionDpiLighting,
+  });
 }
 
 function applyEggFilter(setting: "slamclick" | "motionJitter", enabled: boolean): void {

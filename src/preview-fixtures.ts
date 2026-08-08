@@ -222,7 +222,7 @@ const RAZER_VIPER_V4: MouseStatus = {
 const TEEVOLUTION: MouseStatus = {
   brand: "Teevolution",
   name: "Terra Pro",
-  ui: { defaultDisplayName: "Terra Pro", hideUnsupportedPollingRates: true },
+  ui: { defaultDisplayName: "Terra Pro", hideUnsupportedPollingRates: true, hideSignalCard: true },
   batteryPercent: 52,
   batteryState: "Discharging",
   dpi: 1600,
@@ -232,6 +232,17 @@ const TEEVOLUTION: MouseStatus = {
   liftOffDistance: "Medium",
   connectionType: "Wireless",
   connectionDetail: "CID 1 · MID 2 · Type 3",
+  sensorMode: "Eco",
+  sensorModeStored: 0,
+  sensorModeEditable: true,
+  performanceMode: false,
+  performanceDuration: 6,
+  dpiLedMode: 1,
+  dpiLedBrightness: 5,
+  dpiLedSpeed: 3,
+  motionSync: false,
+  debounceMs: 4,
+  sleepTimeout: 60,
   firmware: ["1.0.2"],
 };
 

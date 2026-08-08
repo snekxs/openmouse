@@ -87,6 +87,10 @@ export interface MouseStatus {
   eggMulticlickFilters?: number[];
   eggButtonMappings?: string[];
   performanceMode?: boolean | null;
+  sensorMode?: "Eco" | "High" | "Ultra" | null;
+  sensorModeStored?: 0 | 1 | null;
+  sensorModeEditable?: boolean | null;
+  performanceDuration?: number | null;
   angleTuning?: number | null;
   wheelAcceleration?: boolean | null;
   lowBatteryWarning?: number | null;

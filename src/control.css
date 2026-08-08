@@ -188,6 +188,7 @@ nav { display: grid; gap: .3rem; margin-top: 1.4rem; }
 .switch-row { display: flex; align-items: center; justify-content: space-between; gap: .5rem; padding: .2rem 0; color: var(--dim); font-size: .7rem; }
 .field-label { display: block; color: var(--faint); font-size: .62rem; }
 .field-label.spaced { margin-top: .35rem; }
+.teevolution-dpi-light-controls { margin-top: .55rem; }
 
 .egg-collapsible, .egg-experimental { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--card); }
 .egg-collapsible summary, .egg-experimental summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; color: #d8d8dc; font-weight: 650; list-style: none; }

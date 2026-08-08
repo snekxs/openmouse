@@ -5,11 +5,10 @@ const BUDGET_BYTES: Record<string, number> = {
   // Viper V3 sleep and low-power controls add a small, device-specific row to
   // the existing settings UI.
   ".css": 46_000,
-  // Raised from 280 kB for the production Logitech onboard-profile codec,
-  // guarded flash editor, verification exporter, upstream Finalmouse driver,
-  // the dedicated Viper Mini protocol driver, and Viper V3 sleep/low-power plus
-  // asymmetric lift-off protocol and controls. Preview fixtures remain dev-only.
-  ".js": 325_000,
+  // Raised from 325 kB for the production Teevolution Compx protocol codec,
+  // CID capability table, verified flash driver, and staged Terra Pro controls.
+  // Protocol tests and preview fixtures are test/dev-only and are not bundled.
+  ".js": 340_000,
 };
 
 const ASSETS = join("dist", "assets");

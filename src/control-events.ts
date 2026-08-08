@@ -40,6 +40,9 @@ export interface ControlEventHandlers {
   toggleSleep(enabled: boolean): void;
   applyLowPowerThreshold(percent: number): void;
   applyPulsarToggle(setting: PulsarToggleSetting, enabled: boolean): void;
+  applyTeevolutionSensorMode(mode: NonNullable<MouseStatus["sensorMode"]>): void;
+  applyTeevolutionPerformanceDuration(duration: number): void;
+  applyTeevolutionDpiLighting(setting: "mode" | "brightness" | "speed", value: number): void;
   applyEggFilter(setting: EggFilterSetting, enabled: boolean): void;
   applyEggSpdtMode(button: "left" | "right", mode: EggSpdtMode): void;
   applyEggCpiLevels(levels: number): void;
@@ -174,6 +177,26 @@ export function bindControlEvents(handlers: ControlEventHandlers): void {
   for (const [selector, setting] of [["#motion-sync-toggle", "motionSync"], ["#angle-snapping-toggle", "angleSnapping"], ["#ripple-control-toggle", "rippleControl"], ["#performance-mode-toggle", "performanceMode"]] as const) {
     document.querySelector<HTMLButtonElement>(selector)?.addEventListener("click", (event) => {
       void handlers.applyPulsarToggle(setting, (event.currentTarget as HTMLButtonElement).getAttribute("aria-checked") !== "true");
+    });
+  }
+  document.querySelector<HTMLSelectElement>("#teevolution-sensor-mode")?.addEventListener("change", (event) => {
+    const mode = (event.target as HTMLSelectElement).value as NonNullable<MouseStatus["sensorMode"]>;
+    void handlers.applyTeevolutionSensorMode(mode);
+  });
+  document.querySelector<HTMLSelectElement>("#teevolution-performance-duration")?.addEventListener("change", (event) => {
+    void handlers.applyTeevolutionPerformanceDuration(Number((event.target as HTMLSelectElement).value));
+  });
+  document.querySelector<HTMLSelectElement>("#teevolution-dpi-light-mode")?.addEventListener("change", (event) => {
+    handlers.applyTeevolutionDpiLighting("mode", Number((event.target as HTMLSelectElement).value));
+  });
+  for (const setting of ["brightness", "speed"] as const) {
+    const input = document.querySelector<HTMLInputElement>(`#teevolution-dpi-light-${setting}`);
+    input?.addEventListener("input", () => {
+      const output = document.querySelector<HTMLOutputElement>(`#teevolution-dpi-light-${setting}-output`);
+      if (output) output.value = input.value;
+    });
+    input?.addEventListener("change", () => {
+      handlers.applyTeevolutionDpiLighting(setting, Number(input.value));
     });
   }
   for (const [selector, setting] of [["#slamclick-filter-toggle", "slamclick"], ["#motion-jitter-filter-toggle", "motionJitter"]] as const) {
