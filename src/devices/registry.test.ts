@@ -10,7 +10,7 @@ import { SUPPORTED_HID_FILTERS, VENDOR_ID } from "./vendors.ts";
 const DEVICES_DIR = dirname(fileURLToPath(import.meta.url));
 
 const REPORT_IDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 0x0f, 0x10, 0x11, 0x20, 0xa1];
-const USAGE_PAGES = [0x01, 0x0c, 0xff00, 0xff01, 0xff02, 0xff0a, 0xff43];
+const USAGE_PAGES = [0x01, 0x0c, 0xff, 0xff00, 0xff01, 0xff02, 0xff0a, 0xff43];
 
 function report(reportId: number, byteLength = 16): HIDReportInfo {
   return { reportId, items: [{ reportSize: 8, reportCount: byteLength }] } as unknown as HIDReportInfo;

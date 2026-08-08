@@ -13,7 +13,16 @@ export const VENDOR_ID = {
   vgn: 0x3554,
   atk: 0x373b,
   finalmouse: 0x361d,
+  moddo: 0x2fe3,
 } as const;
+
+// moddoMOUSE exposes its vendor config interface on usage page 0xff, usage 0x01
+// (older firmware answers on usage 0x02). Offer both so the picker lists the
+// control interface; the driver rejects anything without the config report.
+export const MODDO_HID_FILTERS: HIDDeviceFilter[] = [
+  { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x01 },
+  { vendorId: VENDOR_ID.moddo, usagePage: 0xff, usage: 0x02 },
+];
 
 // Viper V2/V3 Pro expose their control channel as a Generic Desktop Mouse
 // collection. Limit this broad collection filter to known PIDs so it cannot
@@ -127,5 +136,6 @@ export const SUPPORTED_HID_FILTERS: HIDDeviceFilter[] = [
   ...RAZER_VIPER_V4_CONTROL_FILTERS,
   ...RAZER_DEATHADDER_ESSENTIAL_FILTERS,
   ...EGG_WE_HID_FILTERS,
+  ...MODDO_HID_FILTERS,
   ...LOGITECH_RECEIVER_FILTERS,
 ];

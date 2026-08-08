@@ -87,6 +87,7 @@ import { RazerHidClient } from "./devices/razer/hid";
 import { RazerViperMiniHidClient } from "./devices/razer/viper-mini-hid";
 import { RazerViperV4ProHidClient } from "./devices/razer/viper-v4-pro-hid";
 import { FinalmouseHidClient } from "./devices/finalmouse/hid";
+import { ModdoHidClient } from "./devices/moddo/hid";
 import { TeevolutionHidClient } from "./devices/teevolution/hid";
 import { VgnF2HidClient } from "./devices/vgn/hid";
 import { SUPPORTED_HID_FILTERS } from "./devices/vendors";
@@ -120,6 +121,7 @@ let activeRazerClient: RazerHidClient | RazerViperMiniHidClient | null = null;
 let activeTeevolutionClient: TeevolutionHidClient | null = null;
 let activeVgnClient: VgnF2HidClient | null = null;
 let activeViperClient: RazerViperV4ProHidClient | null = null;
+let activeModdoClient: ModdoHidClient | null = null;
 /** Cached onboard profiles; a full read is far too slow for the refresh loop. */
 let onboardProfiles: OnboardProfile[] | null = null;
 let onboardProfilesLoading = false;
@@ -178,7 +180,7 @@ async function statusAfterWrite(client: SupportedClient): Promise<MouseStatus> {
 }
 
 function activeSettingsClient(): SupportedClient | null {
-  return activeClient ?? activePulsarClient ?? activeEggClient ?? activeEggWeClient ?? activeFinalmouseClient ?? activeDmClient ?? activeOrbitalClient ?? activeRazerClient ?? activeViperClient ?? activeTeevolutionClient ?? activeVgnClient;
+  return activeClient ?? activePulsarClient ?? activeEggClient ?? activeEggWeClient ?? activeFinalmouseClient ?? activeDmClient ?? activeOrbitalClient ?? activeRazerClient ?? activeViperClient ?? activeTeevolutionClient ?? activeVgnClient ?? activeModdoClient;
 }
 
 function hasActiveClient(): boolean {
@@ -1483,6 +1485,7 @@ async function activateClient(client: SupportedClient): Promise<void> {
   activeTeevolutionClient = null;
   activeVgnClient = null;
   activeViperClient = null;
+  activeModdoClient = null;
   if (activeDevice !== client.device) onboardProfiles = null;
   activeFinalmouseClient = null;
   activeDevice = client.device;
@@ -1564,6 +1567,14 @@ async function activateClient(client: SupportedClient): Promise<void> {
     dpiOptions = client.getDpiOptions();
     configureDpiControl(status.dpi);
     showStatus(status);
+  } else if (client instanceof ModdoHidClient) {
+    activeModdoClient = client;
+    await client.open();
+    const status = await client.readStatus();
+    deviceStatuses.set(client.device, status);
+    dpiOptions = client.getDpiOptions();
+    configureDpiControl(status.dpi);
+    showStatus(status);
   } else {
     activePulsarClient = client;
     await showPulsarExplorer(client);
@@ -1589,6 +1600,7 @@ function showDisconnectedState(): void {
   activeTeevolutionClient = null;
   activeVgnClient = null;
   activeViperClient = null;
+  activeModdoClient = null;
   activeFinalmouseClient = null;
   activeDevice = null;
   onboardProfiles = null;
@@ -3412,6 +3424,7 @@ window.addEventListener("beforeunload", (event) => {
   void activeVgnClient?.close();
   void activeViperClient?.close();
   void activeFinalmouseClient?.close();
+  void activeModdoClient?.close();
 });
 
 function isChromium(): boolean {

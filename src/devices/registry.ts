@@ -4,6 +4,7 @@ import { eggWeCreate, eggWeIsSupported, eggWeSupportScore, isEggWeClient, type E
 import { FinalmouseHidClient } from "./finalmouse/hid.ts";
 import { LamzuHidClient } from "./lamzu/hid.ts";
 import { LogitechHidppClient } from "./logitech/hidpp.ts";
+import { ModdoHidClient } from "./moddo/hid.ts";
 import { OrbitalHidClient } from "./orbital/hid.ts";
 import { PulsarHidClient } from "./pulsar/pulsar-hid.ts";
 import { PulsarProHidClient } from "./pulsar/pulsar-pro-hid.ts";
@@ -15,7 +16,7 @@ import { VgnF2HidClient } from "./vgn/hid.ts";
 import { WLMouseHidClient } from "./wlmouse/hid.ts";
 
 export type PulsarClient = PulsarHidClient | PulsarProHidClient;
-export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient;
+export type SupportedClient = LogitechHidppClient | PulsarClient | EggOp1HidClient | EggWeHidClient | FinalmouseHidClient | WLMouseHidClient | LamzuHidClient | OrbitalHidClient | RazerHidClient | RazerViperMiniHidClient | RazerViperV4ProHidClient | TeevolutionHidClient | AtkHidClient | VgnF2HidClient | ModdoHidClient;
 
 export interface DeviceDriver {
   brand: string;
@@ -35,6 +36,7 @@ export const DEVICE_DRIVERS: readonly DeviceDriver[] = [
   { brand: "Logitech", supports: (device) => LogitechHidppClient.isSupported(device), create: (device) => new LogitechHidppClient(device), score: () => 6 },
   { brand: "WLMouse", supports: (device) => WLMouseHidClient.isSupported(device), create: (device) => new WLMouseHidClient(device), score: () => 5 },
   { brand: "Lamzu", supports: (device) => LamzuHidClient.isSupported(device), create: (device) => new LamzuHidClient(device), score: () => 5 },
+  { brand: "moddoMOUSE", supports: (device) => ModdoHidClient.isSupported(device), create: (device) => new ModdoHidClient(device), score: () => 5 },
   { brand: "Orbital", supports: (device) => OrbitalHidClient.isSupported(device), create: (device) => new OrbitalHidClient(device), score: () => 6 },
   { brand: "Razer", supports: (device) => RazerHidClient.isSupported(device), create: (device) => new RazerHidClient(device), score: () => 6 },
   { brand: "Razer", supports: (device) => RazerViperMiniHidClient.isSupported(device), create: (device) => new RazerViperMiniHidClient(device), score: () => 6 },
